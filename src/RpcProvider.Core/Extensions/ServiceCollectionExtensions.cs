@@ -45,14 +45,14 @@ public static class ServiceCollectionExtensions
     /// Note: IRpcRepository must be registered separately by each project.
     /// </summary>
     /// <param name="services">The service collection.</param>
-    /// <param name="configureOptions">Action to configure options.</param>
+    /// <param name="configureOptions">Action to configure options with access to the service collection.</param>
     /// <returns>The service collection for chaining.</returns>
     public static IServiceCollection AddRpcUrlProvider(
         this IServiceCollection services,
-        Action<RpcProviderOptions> configureOptions)
+        Action<RpcProviderOptions, IServiceCollection> configureOptions)
     {
-        // Register configuration options
-        services.Configure(configureOptions);
+        // Register configuration options with access to service collection
+        services.Configure<RpcProviderOptions>(options => configureOptions(options, services));
 
         // Register services
         services.AddScoped<IRpcUrlProvider, RpcUrlProvider>();

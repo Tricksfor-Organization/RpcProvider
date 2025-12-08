@@ -189,6 +189,13 @@ builder.Services.AddScoped<IRpcRepository, RpcRepository>();
 // Register RPC URL Provider (from shared library)
 builder.Services.AddRpcUrlProvider(builder.Configuration);
 
+// Or with action-based configuration:
+// builder.Services.AddRpcUrlProvider((options, services) =>
+// {
+//     options.CacheDurationSeconds = 300;
+//     options.MaxConsecutiveErrorsBeforeDisable = 5;
+// });
+
 // Register Health Check Worker (optional)
 builder.Services.AddRpcHealthCheckWorker();
 

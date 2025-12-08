@@ -27,7 +27,7 @@ using RpcProvider.Core.Extensions;
 var builder = WebApplication.CreateBuilder(args);
 
 // Add RpcProvider services
-builder.Services.AddRpcProvider(options =>
+builder.Services.AddRpcUrlProvider((options, services) =>
 {
     options.CacheDurationSeconds = 300;
     options.MaxConsecutiveErrorsBeforeDisable = 5;
