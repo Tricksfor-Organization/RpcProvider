@@ -24,4 +24,9 @@
     <PackageReference Include="Nethereum.Web3" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Ensure the README is included inside the nupkg root so NuGet will display it -->
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
 </Project>
