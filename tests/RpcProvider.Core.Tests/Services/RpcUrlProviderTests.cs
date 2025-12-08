@@ -304,7 +304,7 @@ public class RpcUrlProviderTests
             .Returns((RpcEndpoint?)null);
 
         // Act & Assert
-        Should.NotThrow(async () => await _sut.MarkAsFailedAsync(url, exception));
+        await Should.NotThrowAsync(() => _sut.MarkAsFailedAsync(url, exception));
         await _repository.DidNotReceive().UpdateAsync(Arg.Any<RpcEndpoint>(), Arg.Any<CancellationToken>());
     }
 

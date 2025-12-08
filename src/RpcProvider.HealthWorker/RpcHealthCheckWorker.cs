@@ -11,21 +11,14 @@ namespace RpcProvider.HealthWorker;
 /// Background service that periodically checks the health of error-state RPC endpoints
 /// and marks them as active if they have recovered.
 /// </summary>
-public class RpcHealthCheckWorker : BackgroundService
+public class RpcHealthCheckWorker(
+    IServiceProvider serviceProvider,
+    ILogger<RpcHealthCheckWorker> logger,
+    IOptions<RpcProviderOptions> options) : BackgroundService
 {
-    private readonly IServiceProvider _serviceProvider;
-    private readonly ILogger<RpcHealthCheckWorker> _logger;
-    private readonly RpcProviderOptions _options;
-
-    public RpcHealthCheckWorker(
-        IServiceProvider serviceProvider,
-        ILogger<RpcHealthCheckWorker> logger,
-        IOptions<RpcProviderOptions> options)
-    {
-        _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
-    }
+    private readonly IServiceProvider _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
+    private readonly ILogger<RpcHealthCheckWorker> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly RpcProviderOptions _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
