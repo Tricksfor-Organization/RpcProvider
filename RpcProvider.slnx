@@ -1,0 +1,6 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/RpcProvider.Core/RpcProvider.Core.csproj" />
+    <Project Path="src/RpcProvider.HealthWorker/RpcProvider.HealthWorker.csproj" />
+  </Folder>
+</Solution>
