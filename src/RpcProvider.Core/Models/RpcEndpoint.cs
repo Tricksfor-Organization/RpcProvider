@@ -50,10 +50,10 @@ public class RpcEndpoint
     /// <summary>
     /// Timestamp when the record was created.
     /// </summary>
-    public DateTime CreatedAt { get; set; }
+    public DateTime Created { get; set; }
 
     /// <summary>
     /// Timestamp when the record was last updated.
     /// </summary>
-    public DateTime UpdatedAt { get; set; }
+    public DateTime Modified { get; set; }
 }

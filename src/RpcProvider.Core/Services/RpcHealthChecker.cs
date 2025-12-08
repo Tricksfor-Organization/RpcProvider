@@ -1,30 +1,19 @@
 using Microsoft.Extensions.Logging;
+using Nethereum.Web3;
 using RpcProvider.Core.Interfaces;
 using RpcProvider.Core.Models;
-using System.Net.Http.Json;
-using System.Text.Json;
 
 namespace RpcProvider.Core.Services;
 
 /// <summary>
 /// Service for checking the health of RPC endpoints.
 /// </summary>
-public class RpcHealthChecker
+public class RpcHealthChecker(
+    IRpcRepository repository,
+    ILogger<RpcHealthChecker> logger)
 {
-    private readonly IRpcRepository _repository;
-    private readonly ILogger<RpcHealthChecker> _logger;
-    private readonly HttpClient _httpClient;
-
-    public RpcHealthChecker(
-        IRpcRepository repository,
-        IHttpClientFactory httpClientFactory,
-        ILogger<RpcHealthChecker> logger)
-    {
-        _repository = repository ?? throw new ArgumentNullException(nameof(repository));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _httpClient = httpClientFactory?.CreateClient("RpcHealthCheck") 
-            ?? throw new ArgumentNullException(nameof(httpClientFactory));
-    }
+    private readonly IRpcRepository _repository = repository ?? throw new ArgumentNullException(nameof(repository));
+    private readonly ILogger<RpcHealthChecker> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <summary>
     /// Checks the health of all Error state endpoints and updates their status if recovered.
@@ -34,7 +23,7 @@ public class RpcHealthChecker
         var allEndpoints = await _repository.GetAllAsync(cancellationToken);
         var errorEndpoints = allEndpoints.Where(e => e.State == RpcState.Error).ToList();
 
-        if (!errorEndpoints.Any())
+        if (errorEndpoints.Count == 0)
         {
             _logger.LogDebug("No error state endpoints to check");
             return;
@@ -55,14 +44,14 @@ public class RpcHealthChecker
         {
             _logger.LogDebug("Checking health of RPC endpoint {Url}", endpoint.Url);
 
-            var isHealthy = await TestRpcEndpointAsync(endpoint.Url, cancellationToken);
+            var isHealthy = await TestRpcEndpointAsync(endpoint.Url);
 
             if (isHealthy)
             {
                 endpoint.State = RpcState.Active;
                 endpoint.ConsecutiveErrors = 0;
                 endpoint.ErrorMessage = null;
-                endpoint.UpdatedAt = DateTime.UtcNow;
+                endpoint.Modified = DateTime.UtcNow;
 
                 await _repository.UpdateAsync(endpoint, cancellationToken);
 
@@ -83,48 +72,24 @@ public class RpcHealthChecker
     }
 
     /// <summary>
-    /// Tests an RPC endpoint by making a simple blockchain call.
+    /// Tests an RPC endpoint by making a simple blockchain call using Nethereum.Web3.
     /// </summary>
-    private async Task<bool> TestRpcEndpointAsync(string url, CancellationToken cancellationToken)
+    private async Task<bool> TestRpcEndpointAsync(string url)
     {
         try
         {
-            // Use eth_blockNumber as a simple test call - works for most EVM chains
-            var request = new
+            // Use Nethereum.Web3 to get the block number - works for most EVM chains
+            var web3 = new Web3(url);
+            var blockNumber = await web3.Eth.Blocks.GetBlockNumber.SendRequestAsync();
+
+            if (blockNumber != null && blockNumber.Value >= 0)
             {
-                jsonrpc = "2.0",
-                method = "eth_blockNumber",
-                @params = Array.Empty<string>(),
-                id = 1
-            };
-
-            var response = await _httpClient.PostAsJsonAsync(url, request, cancellationToken);
-
-            if (!response.IsSuccessStatusCode)
-            {
-                _logger.LogDebug("RPC health check failed for {Url}: HTTP {StatusCode}", 
-                    url, response.StatusCode);
-                return false;
-            }
-
-            var content = await response.Content.ReadAsStringAsync(cancellationToken);
-            var jsonDoc = JsonDocument.Parse(content);
-
-            // Check if the response has a result
-            if (jsonDoc.RootElement.TryGetProperty("result", out var result))
-            {
-                _logger.LogDebug("RPC health check successful for {Url}", url);
+                _logger.LogDebug("RPC health check successful for {Url}, current block: {BlockNumber}", 
+                    url, blockNumber.Value);
                 return true;
             }
 
-            // Check if there's an error in the response
-            if (jsonDoc.RootElement.TryGetProperty("error", out var error))
-            {
-                _logger.LogDebug("RPC health check failed for {Url}: {Error}", 
-                    url, error.GetProperty("message").GetString());
-                return false;
-            }
-
+            _logger.LogDebug("RPC health check failed for {Url}: Invalid block number response", url);
             return false;
         }
         catch (HttpRequestException ex)

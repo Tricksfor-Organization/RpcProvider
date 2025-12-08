@@ -2,8 +2,16 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <!-- Include README in the generated NuGet package and set repository/project links -->
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <RepositoryUrl>https://github.com/Tricksfor-Organization/RpcProvider</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageProjectUrl>https://github.com/Tricksfor-Organization/RpcProvider</PackageProjectUrl>
+    <Authors>Tricksfor-Organization</Authors>
+    <Description>RpcProvider Core provides a set of tools for managing and interacting with RPC endpoints for blockchain networks.</Description>
   </PropertyGroup>
 
   <ItemGroup>
@@ -13,6 +21,7 @@
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.Options" />
     <PackageReference Include="Nethereum.Signer" />
+    <PackageReference Include="Nethereum.Web3" />
   </ItemGroup>
 
 </Project>

@@ -60,6 +60,7 @@ dotnet add reference path/to/RpcProvider.HealthWorker/RpcProvider.HealthWorker.c
 
 ```csharp
 using RpcProvider.Core.Models;
+using Nethereum.Signer;
 using Microsoft.EntityFrameworkCore;
 
 public class ApplicationDbContext : DbContext
@@ -78,8 +79,8 @@ public class ApplicationDbContext : DbContext
         modelBuilder.Entity<RpcEndpoint>(entity =>
         {
             entity.HasKey(e => e.Id);
-            entity.HasIndex(e => new { e.ChainId, e.State, e.Priority });
-            entity.Property(e => e.ChainId).IsRequired().HasMaxLength(50);
+            entity.HasIndex(e => new { e.Chain, e.State, e.Priority });
+            entity.Property(e => e.Chain).IsRequired().HasConversion<long>();
             entity.Property(e => e.Url).IsRequired().HasMaxLength(500);
             entity.Property(e => e.State).HasConversion<int>();
         });
@@ -92,6 +93,7 @@ public class ApplicationDbContext : DbContext
 ```csharp
 using RpcProvider.Core.Interfaces;
 using RpcProvider.Core.Models;
+using Nethereum.Signer;
 using Microsoft.EntityFrameworkCore;
 
 public class RpcRepository : IRpcRepository
@@ -104,23 +106,23 @@ public class RpcRepository : IRpcRepository
     }
 
     public async Task<IEnumerable<RpcEndpoint>> GetByChainAndStateAsync(
-        string chainId, 
+        Chain chain, 
         RpcState state, 
         CancellationToken cancellationToken = default)
     {
         return await _context.RpcEndpoints
-            .Where(e => e.ChainId == chainId && e.State == state)
+            .Where(e => e.Chain == chain && e.State == state)
             .OrderBy(e => e.Priority)
             .ThenBy(e => e.ConsecutiveErrors)
             .ToListAsync(cancellationToken);
     }
 
     public async Task<IEnumerable<RpcEndpoint>> GetByChainAsync(
-        string chainId, 
+        Chain chain, 
         CancellationToken cancellationToken = default)
     {
         return await _context.RpcEndpoints
-            .Where(e => e.ChainId == chainId)
+            .Where(e => e.Chain == chain)
             .ToListAsync(cancellationToken);
     }
 
@@ -143,7 +145,7 @@ public class RpcRepository : IRpcRepository
         RpcEndpoint endpoint, 
         CancellationToken cancellationToken = default)
     {
-        endpoint.UpdatedAt = DateTime.UtcNow;
+        endpoint.Modified = DateTime.UtcNow;
         _context.RpcEndpoints.Update(endpoint);
         await _context.SaveChangesAsync(cancellationToken);
     }
@@ -152,8 +154,8 @@ public class RpcRepository : IRpcRepository
         RpcEndpoint endpoint, 
         CancellationToken cancellationToken = default)
     {
-        endpoint.CreatedAt = DateTime.UtcNow;
-        endpoint.UpdatedAt = DateTime.UtcNow;
+        endpoint.Created = DateTime.UtcNow;
+        endpoint.Modified = DateTime.UtcNow;
         await _context.RpcEndpoints.AddAsync(endpoint, cancellationToken);
         await _context.SaveChangesAsync(cancellationToken);
     }
@@ -224,38 +226,41 @@ dotnet ef database update
 ### 6. Seed Initial Data
 
 ```csharp
+using Nethereum.Signer;
+using RpcProvider.Core.Models;
+
 // Add some RPC endpoints to your database
 var endpoints = new List<RpcEndpoint>
 {
     new RpcEndpoint
     {
         Id = Guid.NewGuid(),
-        ChainId = "Ethereum",
+        Chain = Chain.MainNet, // Ethereum Mainnet
         Url = "https://eth-mainnet.g.alchemy.com/v2/YOUR_API_KEY",
         State = RpcState.Active,
         Priority = 1,
-        CreatedAt = DateTime.UtcNow,
-        UpdatedAt = DateTime.UtcNow
+        Created = DateTime.UtcNow,
+        Modified = DateTime.UtcNow
     },
     new RpcEndpoint
     {
         Id = Guid.NewGuid(),
-        ChainId = "Ethereum",
+        Chain = Chain.MainNet,
         Url = "https://mainnet.infura.io/v3/YOUR_API_KEY",
         State = RpcState.Active,
         Priority = 2,
-        CreatedAt = DateTime.UtcNow,
-        UpdatedAt = DateTime.UtcNow
+        Created = DateTime.UtcNow,
+        Modified = DateTime.UtcNow
     },
     new RpcEndpoint
     {
         Id = Guid.NewGuid(),
-        ChainId = "BSC",
+        Chain = Chain.BinanceSmartChain, // BSC Mainnet
         Url = "https://bsc-dataseed1.binance.org/",
         State = RpcState.Active,
         Priority = 1,
-        CreatedAt = DateTime.UtcNow,
-        UpdatedAt = DateTime.UtcNow
+        Created = DateTime.UtcNow,
+        Modified = DateTime.UtcNow
     }
 };
 
@@ -268,6 +273,7 @@ await context.SaveChangesAsync();
 ### Basic Usage with Nethereum
 
 ```csharp
+using Nethereum.Signer;
 using Nethereum.Web3;
 using RpcProvider.Core.Interfaces;
 
@@ -284,9 +290,9 @@ public class BlockchainService
         _logger = logger;
     }
 
-    public async Task<string> GetBalanceAsync(string address, string chainId)
+    public async Task<string> GetBalanceAsync(string address, Chain chain)
     {
-        string rpcUrl = await _rpcProvider.GetBestRpcUrlAsync(chainId);
+        string rpcUrl = await _rpcProvider.GetBestRpcUrlAsync(chain);
 
         try
         {
@@ -320,7 +326,7 @@ public class BlockchainService
     private readonly ILogger<BlockchainService> _logger;
     private const int MaxRetries = 3;
 
-    public async Task<string> GetBalanceWithRetryAsync(string address, string chainId)
+    public async Task<string> GetBalanceWithRetryAsync(string address, Chain chain)
     {
         string? lastFailedUrl = null;
 
@@ -330,8 +336,8 @@ public class BlockchainService
             {
                 // Get next available RPC (excluding previously failed one)
                 string rpcUrl = lastFailedUrl == null
-                    ? await _rpcProvider.GetBestRpcUrlAsync(chainId)
-                    : await _rpcProvider.GetNextRpcUrlAsync(chainId, lastFailedUrl);
+                    ? await _rpcProvider.GetBestRpcUrlAsync(chain)
+                    : await _rpcProvider.GetNextRpcUrlAsync(chain, lastFailedUrl);
 
                 var web3 = new Web3(rpcUrl);
                 var balance = await web3.Eth.GetBalance.SendRequestAsync(address);
@@ -390,19 +396,19 @@ public class BlockchainService
 | Column | Type | Description |
 |--------|------|-------------|
 | Id | Guid | Primary key |
-| ChainId | string(50) | Chain identifier (e.g., "Ethereum", "BSC") |
+| Chain | long | Chain enum value from Nethereum (e.g., 1=MainNet, 137=Polygon) |
 | Url | string(500) | RPC endpoint URL |
 | State | int | State: 0=Active, 1=Error, 2=Disabled |
 | Priority | int | Selection priority (lower = higher priority) |
 | ConsecutiveErrors | int | Number of consecutive errors |
 | ErrorMessage | string? | Last error message |
 | LastErrorAt | DateTime? | Timestamp of last error |
-| CreatedAt | DateTime | Creation timestamp |
-| UpdatedAt | DateTime | Last update timestamp |
+| Created | DateTime | Creation timestamp |
+| Modified | DateTime | Last update timestamp |
 
 **Indexes:**
 - Primary Key: `Id`
-- Composite Index: `(ChainId, State, Priority)`
+- Composite Index: `(Chain, State, Priority)`
 
 ## How It Works
 
@@ -435,7 +441,7 @@ Error Count | Backoff Time
 The background worker:
 1. Runs every N minutes (configurable)
 2. Queries all Error state endpoints
-3. Makes test RPC call (`eth_blockNumber`)
+3. Makes test RPC call using Nethereum (`web3.Eth.Blocks.GetBlockNumber.SendRequestAsync()`)
 4. Marks recovered endpoints as Active
 5. Resets consecutive error count
 
@@ -490,7 +496,9 @@ RpcProvider/
 │   └── RpcProvider.HealthWorker/      # Background health check
 │       ├── RpcHealthCheckWorker.cs
 │       └── HealthWorkerExtensions.cs
-├── tests/                              # Unit tests (to be added)
+├── tests/
+│   ├── RpcProvider.Core.Tests/        # Core library tests (42 tests)
+│   └── RpcProvider.HealthWorker.Tests/# Health worker tests (6 tests)
 ├── samples/                            # Sample projects (to be added)
 └── README.md
 ```

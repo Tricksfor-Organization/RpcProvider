@@ -13,24 +13,16 @@ namespace RpcProvider.Core.Services;
 /// <summary>
 /// Main service for managing and retrieving RPC URLs with caching and failover support.
 /// </summary>
-public class RpcUrlProvider : IRpcUrlProvider
+public class RpcUrlProvider(
+    IRpcRepository repository,
+    IDistributedCache cache,
+    IOptions<RpcProviderOptions> options,
+    ILogger<RpcUrlProvider> logger) : IRpcUrlProvider
 {
-    private readonly IRpcRepository _repository;
-    private readonly IDistributedCache _cache;
-    private readonly RpcProviderOptions _options;
-    private readonly ILogger<RpcUrlProvider> _logger;
-
-    public RpcUrlProvider(
-        IRpcRepository repository,
-        IDistributedCache cache,
-        IOptions<RpcProviderOptions> options,
-        ILogger<RpcUrlProvider> logger)
-    {
-        _repository = repository ?? throw new ArgumentNullException(nameof(repository));
-        _cache = cache ?? throw new ArgumentNullException(nameof(cache));
-        _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly IRpcRepository _repository = repository ?? throw new ArgumentNullException(nameof(repository));
+    private readonly IDistributedCache _cache = cache ?? throw new ArgumentNullException(nameof(cache));
+    private readonly RpcProviderOptions _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
+    private readonly ILogger<RpcUrlProvider> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     public async Task<string> GetBestRpcUrlAsync(Chain chain, CancellationToken cancellationToken = default)
     {
@@ -53,15 +45,12 @@ public class RpcUrlProvider : IRpcUrlProvider
             endpoints = (await GetRecoverableErrorEndpointsAsync(chain, cancellationToken)).ToList();
         }
 
-        if (!endpoints.Any())
+        if (!endpoints.Any() && _options.AllowDisabledEndpointsAsFallback)
         {
             // 4. Last resort: Try disabled endpoints (emergency mode)
-            if (_options.AllowDisabledEndpointsAsFallback)
-            {
-                _logger.LogCritical("No healthy RPC endpoints for chain {Chain} ({ChainId}), using disabled endpoints as fallback", 
-                    chain, (int)chain);
-                endpoints = (await _repository.GetByChainAndStateAsync(chain, RpcState.Disabled, cancellationToken)).ToList();
-            }
+            _logger.LogCritical("No healthy RPC endpoints for chain {Chain} ({ChainId}), using disabled endpoints as fallback", 
+                chain, (int)chain);
+            endpoints = (await _repository.GetByChainAndStateAsync(chain, RpcState.Disabled, cancellationToken)).ToList();
         }
 
         if (!endpoints.Any())
@@ -108,7 +97,7 @@ public class RpcUrlProvider : IRpcUrlProvider
             throw new NoHealthyRpcException(chain, $"No alternative RPC endpoints available for chain: {chain} ({(int)chain})");
         }
 
-        var nextEndpoint = endpoints.First();
+        var nextEndpoint = endpoints[0];
         _logger.LogInformation("Selected next RPC endpoint {Url} for chain {Chain} ({ChainId})", 
             nextEndpoint.Url, chain, (int)chain);
 
@@ -133,7 +122,7 @@ public class RpcUrlProvider : IRpcUrlProvider
         endpoint.ConsecutiveErrors++;
         endpoint.LastErrorAt = DateTime.UtcNow;
         endpoint.ErrorMessage = exception?.Message ?? "Unknown error";
-        endpoint.UpdatedAt = DateTime.UtcNow;
+        endpoint.Modified = DateTime.UtcNow;
 
         // Mark as Error if threshold exceeded
         if (endpoint.ConsecutiveErrors >= _options.MaxConsecutiveErrorsBeforeDisable)
@@ -169,7 +158,7 @@ public class RpcUrlProvider : IRpcUrlProvider
 
         endpoint.ConsecutiveErrors = 0;
         endpoint.ErrorMessage = null;
-        endpoint.UpdatedAt = DateTime.UtcNow;
+        endpoint.Modified = DateTime.UtcNow;
 
         // Mark as Active if it was in Error state
         if (endpoint.State == RpcState.Error)
@@ -258,12 +247,12 @@ public class RpcUrlProvider : IRpcUrlProvider
         {
             var cacheKey = GetCacheKey(chain);
             var cacheBytes = Encoding.UTF8.GetBytes(url);
-            var options = new DistributedCacheEntryOptions
+            var cacheOptions = new DistributedCacheEntryOptions
             {
                 AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(_options.CacheDurationSeconds)
             };
 
-            await _cache.SetAsync(cacheKey, cacheBytes, options, cancellationToken);
+            await _cache.SetAsync(cacheKey, cacheBytes, cacheOptions, cancellationToken);
             _logger.LogDebug("Cached RPC URL for chain {Chain} ({ChainId})", chain, (int)chain);
         }
         catch (Exception ex)
@@ -288,7 +277,7 @@ public class RpcUrlProvider : IRpcUrlProvider
         }
     }
 
-    private string GetCacheKey(Chain chain) => $"rpc:best:{(int)chain}";
+    private static string GetCacheKey(Chain chain) => $"rpc:best:{(int)chain}";
 
     #endregion
 }

@@ -5,7 +5,7 @@ namespace RpcProvider.Core.Exceptions;
 /// <summary>
 /// Exception thrown when no healthy RPC endpoints are available for a chain.
 /// </summary>
-public class NoHealthyRpcException : Exception
+public class NoHealthyRpcException : RpcProviderException
 {
     public Chain Chain { get; }
 
