@@ -44,7 +44,7 @@ public class RpcUrlProvider(
             endpoints = (await GetRecoverableErrorEndpointsAsync(chain, cancellationToken)).ToList();
         }
 
-        if (!endpoints.Any() && _options.AllowDisabledEndpointsAsFallback)
+        if (endpoints.Count == 0 && _options.AllowDisabledEndpointsAsFallback)
         {
             // 4. Last resort: Try disabled endpoints (emergency mode)
             _logger.LogCritical("No healthy RPC endpoints for chain {Chain} ({ChainId}), using disabled endpoints as fallback", 
@@ -52,7 +52,7 @@ public class RpcUrlProvider(
             endpoints = (await _repository.GetByChainAndStateAsync(chain, RpcState.Disabled, cancellationToken)).ToList();
         }
 
-        if (!endpoints.Any())
+        if (endpoints.Count == 0)
         {
             _logger.LogError("No available RPC endpoints for chain {Chain} ({ChainId})", chain, (int)chain);
             throw new NoHealthyRpcException(chain);
