@@ -7,7 +7,7 @@ A robust .NET library for managing blockchain RPC endpoints with automatic failo
 - ✅ **Automatic Failover**: Seamlessly switches to alternative endpoints when failures occur
 - ✅ **Health Monitoring**: Background service that tests failed endpoints and marks them as active when recovered
 - ✅ **Intelligent Selection**: Chooses endpoints based on priority and error count
-- ✅ **Redis Caching**: Fast endpoint retrieval with distributed caching support
+- ✅ **HybridCache**: In-memory + distributed (Redis) caching with automatic fallback
 - ✅ **Exponential Backoff**: Prevents overwhelming failed endpoints with requests
 - ✅ **Multi-Chain Support**: Manages endpoints for multiple blockchain networks
 - ✅ **Clean Architecture**: Designed to fit in Infrastructure layer
@@ -180,8 +180,11 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
-// Add Redis distributed cache (via Aspire or manually)
-builder.AddRedisDistributedCache("redis");
+// Optional: Add Redis for distributed caching (via Aspire or manually)
+// If Redis is not configured, HybridCache automatically uses in-memory caching only
+builder.AddRedisDistributedCache("redis"); // Aspire
+// OR manually:
+// builder.Services.AddStackExchangeRedisCache(options => { options.Configuration = "localhost:6379"; });
 
 // Register RPC Repository
 builder.Services.AddScoped<IRpcRepository, RpcRepository>();
@@ -421,12 +424,25 @@ public class BlockchainService
 
 ### Endpoint Selection Strategy
 
-1. **Retrieve from Cache**: Check Redis for cached endpoint
+1. **Retrieve from Cache**: Check HybridCache (L1: in-memory, L2: Redis if configured)
 2. **Query Active Endpoints**: Get all Active state endpoints for the chain
 3. **Fallback to Error State**: If no Active endpoints, try Error state endpoints (respecting exponential backoff)
 4. **Emergency Mode**: Optionally use Disabled endpoints as last resort
 5. **Sort by Priority**: Order by Priority ASC, then ConsecutiveErrors ASC
-6. **Cache Result**: Store selected endpoint in Redis
+6. **Cache Result**: Store selected endpoint in HybridCache (both L1 and L2)
+
+### Caching Architecture
+
+**HybridCache** provides two-level caching:
+- **L1 (In-Memory)**: Fast local cache, no network round trip
+- **L2 (Redis)**: Distributed cache shared across instances (if Redis is configured)
+
+**Automatic Fallback:**
+- If Redis is not configured → uses in-memory only
+- If Redis connection fails → falls back to in-memory automatically
+- When Redis recovers → automatically uses distributed caching again
+
+This means your application works perfectly fine with or without Redis!
 
 ### Exponential Backoff
 

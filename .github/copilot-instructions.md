@@ -2,13 +2,13 @@
 
 ## Project Overview
 
-RpcProvider is a .NET 10.0 library for managing blockchain RPC endpoints with automatic failover, health monitoring, and distributed caching. It provides intelligent endpoint selection, exponential backoff for failed endpoints, and background health checks using Nethereum.Web3.
+RpcProvider is a .NET 10.0 library for managing blockchain RPC endpoints with automatic failover, health monitoring, and hybrid caching (in-memory + distributed). It provides intelligent endpoint selection, exponential backoff for failed endpoints, and background health checks using Nethereum.Web3.
 
 **Key Technologies:**
 - .NET 10.0 (C# 13 with primary constructors)
 - Nethereum.Web3 5.0.0 for blockchain interactions
 - Entity Framework Core for data persistence
-- Redis distributed caching
+- HybridCache (in-memory + Redis with automatic fallback)
 - Background worker pattern
 
 ## Architecture Principles
@@ -56,7 +56,7 @@ All services use C# 13 primary constructors:
 // ✅ CORRECT - Primary constructor
 public class RpcUrlProvider(
     IRpcRepository repository,
-    IDistributedCache cache,
+    HybridCache cache,
     IOptions<RpcProviderOptions> options,
     ILogger<RpcUrlProvider> logger) : IRpcUrlProvider
 {
@@ -102,13 +102,13 @@ await httpClient.PostAsync(endpoint.Url, content);
 public class RpcUrlProviderTests
 {
     private IRpcRepository _repository = null!;
-    private IDistributedCache _cache = null!;
+    private HybridCache _cache = null!;
     
     [SetUp]
     public void Setup()
     {
         _repository = Substitute.For<IRpcRepository>();
-        _cache = Substitute.For<IDistributedCache>();
+        _cache = Substitute.For<HybridCache>();
     }
     
     [Test]
@@ -310,12 +310,17 @@ catch (NoHealthyRpcException ex) // No healthy endpoints
   <PackageReference Update="Nethereum.Web3" Version="5.0.0" />
   <PackageReference Update="Nethereum.Signer" Version="5.0.0" />
   <PackageReference Update="Microsoft.EntityFrameworkCore" Version="10.0.0" />
-  <PackageReference Update="Microsoft.Extensions.Caching.StackExchangeRedis" Version="10.0.0" />
+  <PackageReference Update="Microsoft.Extensions.Caching.Hybrid" Version="10.0.0" />
   <PackageReference Update="NUnit" Version="4.3.1" />
   <PackageReference Update="Shouldly" Version="4.2.1" />
   <PackageReference Update="NSubstitute" Version="5.3.0" />
 </ItemGroup>
 ```
+
+**Note on Caching:**
+- The library uses `HybridCache` which provides L1 (in-memory) + L2 (distributed) caching
+- L2 cache (Redis) is optional - if not configured, only L1 is used
+- Redis can be added via `AddStackExchangeRedisCache` or Aspire `AddRedisDistributedCache`
 
 ## CI/CD
 

@@ -14,6 +14,9 @@ public static class ServiceCollectionExtensions
     /// <summary>
     /// Adds RPC URL provider services to the service collection.
     /// Note: IRpcRepository must be registered separately by each project.
+    /// HybridCache will be registered automatically with in-memory caching.
+    /// For distributed caching (Redis), register Redis before calling this method:
+    /// services.AddStackExchangeRedisCache() or use Aspire: builder.AddRedisDistributedCache("cache")
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <param name="configuration">The configuration.</param>
@@ -26,6 +29,9 @@ public static class ServiceCollectionExtensions
     {
         // Register configuration options
         services.Configure<RpcProviderOptions>(configuration.GetSection(sectionName));
+
+        // Register HybridCache - automatically uses Redis if registered, otherwise in-memory only
+        services.AddHybridCache();
 
         // Register services
         services.AddScoped<IRpcUrlProvider, RpcUrlProvider>();
@@ -43,6 +49,9 @@ public static class ServiceCollectionExtensions
     /// <summary>
     /// Adds RPC URL provider services with custom options configuration.
     /// Note: IRpcRepository must be registered separately by each project.
+    /// HybridCache will be registered automatically with in-memory caching.
+    /// For distributed caching (Redis), register Redis before calling this method:
+    /// services.AddStackExchangeRedisCache() or use Aspire: builder.AddRedisDistributedCache("cache")
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <param name="configureOptions">Action to configure options with access to the service collection.</param>
@@ -53,6 +62,9 @@ public static class ServiceCollectionExtensions
     {
         // Register configuration options with access to service collection
         services.Configure<RpcProviderOptions>(options => configureOptions(options, services));
+
+        // Register HybridCache - automatically uses Redis if registered, otherwise in-memory only
+        services.AddHybridCache();
 
         // Register services
         services.AddScoped<IRpcUrlProvider, RpcUrlProvider>();

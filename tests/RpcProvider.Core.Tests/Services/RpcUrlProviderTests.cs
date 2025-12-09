@@ -1,19 +1,15 @@
 #pragma warning disable S1075 // URIs should not be hardcoded
 #pragma warning disable S1192 // String literals should not be duplicated
-using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Nethereum.Signer;
-using NSubstitute;
 using NSubstitute.ExceptionExtensions;
-using NUnit.Framework;
 using RpcProvider.Core.Configuration;
 using RpcProvider.Core.Exceptions;
 using RpcProvider.Core.Interfaces;
 using RpcProvider.Core.Models;
 using RpcProvider.Core.Services;
-using Shouldly;
-using System.Text;
 
 namespace RpcProvider.Core.Tests.Services;
 
@@ -21,7 +17,7 @@ namespace RpcProvider.Core.Tests.Services;
 public class RpcUrlProviderTests
 {
     private IRpcRepository _repository = null!;
-    private IDistributedCache _cache = null!;
+    private HybridCache _cache = null!;
     private RpcProviderOptions _options = null!;
     private RpcUrlProvider _sut = null!;
 
@@ -29,7 +25,7 @@ public class RpcUrlProviderTests
     public void SetUp()
     {
         _repository = Substitute.For<IRpcRepository>();
-        _cache = Substitute.For<IDistributedCache>();
+        _cache = Substitute.For<HybridCache>();
         var logger = Substitute.For<ILogger<RpcUrlProvider>>();
         _options = new RpcProviderOptions
         {
@@ -56,10 +52,12 @@ public class RpcUrlProviderTests
         var chain = Chain.MainNet;
         var cachedUrl = "https://cached-eth-rpc.example.com";
         var cacheKey = $"rpc:best:{(int)chain}";
-        var cachedBytes = Encoding.UTF8.GetBytes(cachedUrl);
 
-        _cache.GetAsync(cacheKey, Arg.Any<CancellationToken>())
-            .Returns(cachedBytes);
+        _cache.GetOrCreateAsync<string?>(
+                cacheKey,
+                Arg.Any<Func<CancellationToken, ValueTask<string?>>>(),
+                cancellationToken: Arg.Any<CancellationToken>())
+            .Returns(cachedUrl);
 
         // Act
         var result = await _sut.GetBestRpcUrlAsync(chain);
@@ -81,8 +79,11 @@ public class RpcUrlProviderTests
             new() { Id = Guid.NewGuid(), Chain = chain, Url = "https://eth-rpc-3.example.com", State = RpcState.Active, Priority = 1, ConsecutiveErrors = 1 }
         };
 
-        _cache.GetAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .Returns((byte[]?)null);
+        _cache.GetOrCreateAsync<string?>(
+                Arg.Any<string>(),
+                Arg.Any<Func<CancellationToken, ValueTask<string?>>>(),
+                cancellationToken: Arg.Any<CancellationToken>())
+            .Returns((string?)null);
 
         _repository.GetByChainAndStateAsync(chain, RpcState.Active, Arg.Any<CancellationToken>())
             .Returns(endpoints);
@@ -92,7 +93,7 @@ public class RpcUrlProviderTests
 
         // Assert
         result.ShouldBe("https://eth-rpc-2.example.com"); // Priority 1, ConsecutiveErrors 0
-        await _cache.Received(1).SetAsync(Arg.Any<string>(), Arg.Any<byte[]>(), Arg.Any<DistributedCacheEntryOptions>(), Arg.Any<CancellationToken>());
+        await _cache.Received(1).SetAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<HybridCacheEntryOptions>(), Arg.Any<string[]>(), Arg.Any<CancellationToken>());
     }
 
     [Test]
@@ -111,8 +112,11 @@ public class RpcUrlProviderTests
             LastErrorAt = DateTime.UtcNow.AddMinutes(-10) // Past backoff period
         };
 
-        _cache.GetAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .Returns((byte[]?)null);
+        _cache.GetOrCreateAsync<string?>(
+                Arg.Any<string>(),
+                Arg.Any<Func<CancellationToken, ValueTask<string?>>>(),
+                cancellationToken: Arg.Any<CancellationToken>())
+            .Returns((string?)null);
 
         _repository.GetByChainAndStateAsync(chain, RpcState.Active, Arg.Any<CancellationToken>())
             .Returns(new List<RpcEndpoint>());
@@ -144,8 +148,11 @@ public class RpcUrlProviderTests
             ConsecutiveErrors = 0
         };
 
-        _cache.GetAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .Returns((byte[]?)null);
+        _cache.GetOrCreateAsync<string?>(
+                Arg.Any<string>(),
+                Arg.Any<Func<CancellationToken, ValueTask<string?>>>(),
+                cancellationToken: Arg.Any<CancellationToken>())
+            .Returns((string?)null);
 
         _repository.GetByChainAndStateAsync(chain, RpcState.Active, Arg.Any<CancellationToken>())
             .Returns(new List<RpcEndpoint>());
@@ -169,8 +176,11 @@ public class RpcUrlProviderTests
         // Arrange
         var chain = Chain.MainNet;
 
-        _cache.GetAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .Returns((byte[]?)null);
+        _cache.GetOrCreateAsync<string?>(
+                Arg.Any<string>(),
+                Arg.Any<Func<CancellationToken, ValueTask<string?>>>(),
+                cancellationToken: Arg.Any<CancellationToken>())
+            .Returns((string?)null);
 
         _repository.GetByChainAndStateAsync(Arg.Any<Chain>(), Arg.Any<RpcState>(), Arg.Any<CancellationToken>())
             .Returns(new List<RpcEndpoint>());
@@ -200,7 +210,7 @@ public class RpcUrlProviderTests
 
         // Assert
         result.ShouldBe("https://eth-rpc-2.example.com");
-        await _cache.Received(1).SetAsync(Arg.Any<string>(), Arg.Any<byte[]>(), Arg.Any<DistributedCacheEntryOptions>(), Arg.Any<CancellationToken>());
+        await _cache.Received(1).SetAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<HybridCacheEntryOptions>(), Arg.Any<string[]>(), Arg.Any<CancellationToken>());
     }
 
     [Test]
@@ -489,8 +499,11 @@ public class RpcUrlProviderTests
             ConsecutiveErrors = 0
         };
 
-        _cache.GetAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromException<byte[]?>(new Exception("Cache error")));
+        _cache.GetOrCreateAsync<string?>(
+                Arg.Any<string>(),
+                Arg.Any<Func<CancellationToken, ValueTask<string?>>>(),
+                cancellationToken: Arg.Any<CancellationToken>())
+            .Throws(new Exception("Cache error"));
 
         _repository.GetByChainAndStateAsync(chain, RpcState.Active, Arg.Any<CancellationToken>())
             .Returns(new List<RpcEndpoint> { endpoint });

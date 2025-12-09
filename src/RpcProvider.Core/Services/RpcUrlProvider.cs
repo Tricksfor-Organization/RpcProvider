@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Nethereum.Signer;
@@ -6,7 +6,6 @@ using RpcProvider.Core.Configuration;
 using RpcProvider.Core.Exceptions;
 using RpcProvider.Core.Interfaces;
 using RpcProvider.Core.Models;
-using System.Text;
 
 namespace RpcProvider.Core.Services;
 
@@ -15,12 +14,12 @@ namespace RpcProvider.Core.Services;
 /// </summary>
 public class RpcUrlProvider(
     IRpcRepository repository,
-    IDistributedCache cache,
+    HybridCache cache,
     IOptions<RpcProviderOptions> options,
     ILogger<RpcUrlProvider> logger) : IRpcUrlProvider
 {
     private readonly IRpcRepository _repository = repository ?? throw new ArgumentNullException(nameof(repository));
-    private readonly IDistributedCache _cache = cache ?? throw new ArgumentNullException(nameof(cache));
+    private readonly HybridCache _cache = cache ?? throw new ArgumentNullException(nameof(cache));
     private readonly RpcProviderOptions _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
     private readonly ILogger<RpcUrlProvider> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
@@ -45,7 +44,7 @@ public class RpcUrlProvider(
             endpoints = (await GetRecoverableErrorEndpointsAsync(chain, cancellationToken)).ToList();
         }
 
-        if (!endpoints.Any() && _options.AllowDisabledEndpointsAsFallback)
+        if (endpoints.Count == 0 && _options.AllowDisabledEndpointsAsFallback)
         {
             // 4. Last resort: Try disabled endpoints (emergency mode)
             _logger.LogCritical("No healthy RPC endpoints for chain {Chain} ({ChainId}), using disabled endpoints as fallback", 
@@ -53,7 +52,7 @@ public class RpcUrlProvider(
             endpoints = (await _repository.GetByChainAndStateAsync(chain, RpcState.Disabled, cancellationToken)).ToList();
         }
 
-        if (!endpoints.Any())
+        if (endpoints.Count == 0)
         {
             _logger.LogError("No available RPC endpoints for chain {Chain} ({ChainId})", chain, (int)chain);
             throw new NoHealthyRpcException(chain);
@@ -225,12 +224,15 @@ public class RpcUrlProvider(
         try
         {
             var cacheKey = GetCacheKey(chain);
-            var cachedBytes = await _cache.GetAsync(cacheKey, cancellationToken);
+            
+            // Try to get from cache - returns null if not found
+            var cachedUrl = await _cache.GetOrCreateAsync<string?>(
+                cacheKey,
+                cancel => ValueTask.FromResult<string?>(null), // Factory returns null = not in cache
+                cancellationToken: cancellationToken
+            );
 
-            if (cachedBytes != null && cachedBytes.Length > 0)
-            {
-                return Encoding.UTF8.GetString(cachedBytes);
-            }
+            return cachedUrl;
         }
         catch (Exception ex)
         {
@@ -246,13 +248,12 @@ public class RpcUrlProvider(
         try
         {
             var cacheKey = GetCacheKey(chain);
-            var cacheBytes = Encoding.UTF8.GetBytes(url);
-            var cacheOptions = new DistributedCacheEntryOptions
+            var cacheOptions = new HybridCacheEntryOptions
             {
-                AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(_options.CacheDurationSeconds)
+                Expiration = TimeSpan.FromSeconds(_options.CacheDurationSeconds)
             };
 
-            await _cache.SetAsync(cacheKey, cacheBytes, cacheOptions, cancellationToken);
+            await _cache.SetAsync(cacheKey, url, cacheOptions, cancellationToken: cancellationToken);
             _logger.LogDebug("Cached RPC URL for chain {Chain} ({ChainId})", chain, (int)chain);
         }
         catch (Exception ex)

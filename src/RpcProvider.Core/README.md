@@ -7,7 +7,7 @@ A robust .NET library for managing blockchain RPC endpoints with automatic failo
 - 🔄 **Automatic Failover**: Seamlessly switch between RPC endpoints when failures occur
 - 🏥 **Health Monitoring**: Built-in health checks using Nethereum.Web3
 - 🚀 **Intelligent Selection**: Priority-based endpoint selection with exponential backoff
-- 💾 **Distributed Caching**: Redis support for caching healthy endpoints
+- 💾 **HybridCache**: In-memory + distributed (Redis) caching with automatic fallback
 - 📊 **State Management**: Track endpoint states (Active, Error, Disabled)
 - 🔁 **Retry Logic**: Automatic retry with different endpoints
 
@@ -41,11 +41,14 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
 // Implement and register IRpcRepository
 builder.Services.AddScoped<IRpcRepository, RpcRepository>();
 
-// Add Redis (optional but recommended)
+// Optional: Add Redis for distributed caching
+// If not configured, HybridCache uses in-memory caching only
 builder.Services.AddStackExchangeRedisCache(options =>
 {
     options.Configuration = "localhost:6379";
 });
+// OR use Aspire:
+// builder.AddRedisDistributedCache("cache");
 ```
 
 ### 2. Configure Entity Framework
