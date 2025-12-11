@@ -15,7 +15,9 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\RpcProvider.Core\RpcProvider.Core.csproj" />
+    <ProjectReference Include="..\RpcProvider.Core\RpcProvider.Core.csproj">
+      <PackageId>Tricksfor.RpcProvider.Core</PackageId>
+    </ProjectReference>
   </ItemGroup>
 
   <ItemGroup>
