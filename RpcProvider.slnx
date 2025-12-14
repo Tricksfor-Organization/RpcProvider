@@ -1,10 +1,8 @@
 <Solution>
   <Folder Name="/src/">
-    <Project Path="src/RpcProvider.Core/RpcProvider.Core.csproj" />
-    <Project Path="src/RpcProvider.HealthWorker/RpcProvider.HealthWorker.csproj" />
+    <Project Path="src/RpcProvider/RpcProvider.csproj" />
   </Folder>
   <Folder Name="/tests/">
-    <Project Path="tests/RpcProvider.Core.Tests/RpcProvider.Core.Tests.csproj" />
-    <Project Path="tests/RpcProvider.HealthWorker.Tests/RpcProvider.HealthWorker.Tests.csproj" />
+    <Project Path="tests/RpcProvider.Tests/RpcProvider.Tests.csproj" />
   </Folder>
 </Solution>
