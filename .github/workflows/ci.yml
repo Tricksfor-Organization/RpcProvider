@@ -4,7 +4,7 @@ env:
   # Optional secret to prefix the package id (e.g. Tricksfor). Leave unset to keep project name as-is.
   NUGET_PACKAGE_PREFIX: ${{ secrets.NUGET_PACKAGE_PREFIX }}
   NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
-  CORE_APPLICATION_NAME: RpcProvider
+  APPLICATION_NAME: RpcProvider
 
 
 on:
@@ -69,7 +69,7 @@ jobs:
           echo "Computed PACKAGE_VERSION=$tag"
           echo "PACKAGE_VERSION=$tag" >> $GITHUB_ENV
 
-      - name: Pack RpcProvider.Core NuGet package
+      - name: Pack RpcProvider NuGet package
         if: github.event_name == 'release' && github.event.action == 'published'
         run: |
           # Compute package ID using optional prefix. Do not fail if prefix is empty.
@@ -80,22 +80,22 @@ jobs:
           # Use shell environment variables inside the run script. These are populated
           # from the workflow-level `env:` (which can include secrets).
           if [ -n "${NUGET_PACKAGE_PREFIX:-}" ]; then
-            PACKAGE_ID="${NUGET_PACKAGE_PREFIX}.${CORE_APPLICATION_NAME}"
+            PACKAGE_ID="${NUGET_PACKAGE_PREFIX}.${APPLICATION_NAME}"
           else
-            PACKAGE_ID="${CORE_APPLICATION_NAME}"
+            PACKAGE_ID="${APPLICATION_NAME}"
           fi
 
           echo "Using PackageId=$PACKAGE_ID"
 
           if [ -n "${PACKAGE_VERSION:-}" ]; then
-            dotnet pack src/${{ env.CORE_APPLICATION_NAME }}/${{ env.CORE_APPLICATION_NAME }}.csproj -c Release -o ./nupkgs/core --no-build --include-symbols --include-source /p:PackageVersion=$PACKAGE_VERSION /p:PackageId="$PACKAGE_ID"
+            dotnet pack src/${{ env.APPLICATION_NAME }}/${{ env.APPLICATION_NAME }}.csproj -c Release -o ./nupkgs --no-build --include-symbols --include-source /p:PackageVersion=$PACKAGE_VERSION /p:PackageId="$PACKAGE_ID"
           else
-            dotnet pack src/${{ env.CORE_APPLICATION_NAME }}/${{ env.CORE_APPLICATION_NAME }}.csproj -c Release -o ./nupkgs/core --no-build --include-symbols --include-source /p:PackageId="$PACKAGE_ID"
+            dotnet pack src/${{ env.APPLICATION_NAME }}/${{ env.APPLICATION_NAME }}.csproj -c Release -o ./nupkgs --no-build --include-symbols --include-source /p:PackageId="$PACKAGE_ID"
           fi
 
-      - name: Publish Core NuGet package
+      - name: Publish NuGet package
         if: github.event_name == 'release' && github.event.action == 'published'
         run: |
-          echo "Publishing packages found in ./nupkgs/core"
-          ls -la ./nupkgs/core || true
-          dotnet nuget push ./nupkgs/core/*.nupkg -k $NUGET_API_KEY -s https://api.nuget.org/v3/index.json --skip-duplicate
+          echo "Publishing packages found in ./nupkgs"
+          ls -la ./nupkgs || true
+          dotnet nuget push ./nupkgs/*.nupkg -k $NUGET_API_KEY -s https://api.nuget.org/v3/index.json --skip-duplicate
