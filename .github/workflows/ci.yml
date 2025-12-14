@@ -4,7 +4,7 @@ env:
   # Optional secret to prefix the package id (e.g. Tricksfor). Leave unset to keep project name as-is.
   NUGET_PACKAGE_PREFIX: ${{ secrets.NUGET_PACKAGE_PREFIX }}
   NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
-  CORE_APPLICATION_NAME: RpcProvider.Core
+  CORE_APPLICATION_NAME: RpcProvider
 
 
 on:
