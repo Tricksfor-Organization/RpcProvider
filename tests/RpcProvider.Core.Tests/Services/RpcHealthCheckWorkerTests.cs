@@ -5,10 +5,9 @@ using NSubstitute;
 using NUnit.Framework;
 using RpcProvider.Core.Configuration;
 using RpcProvider.Core.Services;
-using RpcProvider.HealthWorker;
 using Shouldly;
 
-namespace RpcProvider.HealthWorker.Tests;
+namespace RpcProvider.Core.Tests.Services;
 
 [TestFixture]
 public class RpcHealthCheckWorkerTests

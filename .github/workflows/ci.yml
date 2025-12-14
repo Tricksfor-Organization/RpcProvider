@@ -5,7 +5,6 @@ env:
   NUGET_PACKAGE_PREFIX: ${{ secrets.NUGET_PACKAGE_PREFIX }}
   NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
   CORE_APPLICATION_NAME: RpcProvider.Core
-  HEALTHWORKER_APPLICATION_NAME: RpcProvider.HealthWorker
 
 
 on:
@@ -100,34 +99,3 @@ jobs:
           echo "Publishing packages found in ./nupkgs/core"
           ls -la ./nupkgs/core || true
           dotnet nuget push ./nupkgs/core/*.nupkg -k $NUGET_API_KEY -s https://api.nuget.org/v3/index.json --skip-duplicate
-
-      - name: Pack RpcProvider.HealthWorker NuGet package
-        if: github.event_name == 'release' && github.event.action == 'published'
-        run: |
-          # Compute package ID using optional prefix. Do not fail if prefix is empty.
-          if [ -n "${PACKAGE_VERSION:-}" ]; then
-            echo "Packing with version $PACKAGE_VERSION"
-          fi
-
-          # Use shell environment variables inside the run script. These are populated
-          # from the workflow-level `env:` (which can include secrets).
-          if [ -n "${NUGET_PACKAGE_PREFIX:-}" ]; then
-            PACKAGE_ID="${NUGET_PACKAGE_PREFIX}.${HEALTHWORKER_APPLICATION_NAME}"
-          else
-            PACKAGE_ID="${HEALTHWORKER_APPLICATION_NAME}"
-          fi
-
-          echo "Using PackageId=$PACKAGE_ID"
-
-          if [ -n "${PACKAGE_VERSION:-}" ]; then
-            dotnet pack src/${{ env.HEALTHWORKER_APPLICATION_NAME }}/${{ env.HEALTHWORKER_APPLICATION_NAME }}.csproj -c Release -o ./nupkgs/healthworker --no-build --include-symbols --include-source /p:PackageVersion=$PACKAGE_VERSION /p:PackageId="$PACKAGE_ID"
-          else
-            dotnet pack src/${{ env.HEALTHWORKER_APPLICATION_NAME }}/${{ env.HEALTHWORKER_APPLICATION_NAME }}.csproj -c Release -o ./nupkgs/healthworker --no-build --include-symbols --include-source /p:PackageId="$PACKAGE_ID"
-          fi
-
-      - name: Publish HealthWorker NuGet package
-        if: github.event_name == 'release' && github.event.action == 'published'
-        run: |
-          echo "Publishing packages found in ./nupkgs/healthworker"
-          ls -la ./nupkgs/healthworker || true
-          dotnet nuget push ./nupkgs/healthworker/*.nupkg -k $NUGET_API_KEY -s https://api.nuget.org/v3/index.json --skip-duplicate

@@ -3,9 +3,8 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using RpcProvider.Core.Configuration;
-using RpcProvider.Core.Services;
 
-namespace RpcProvider.HealthWorker;
+namespace RpcProvider.Core.Services;
 
 /// <summary>
 /// Background service that periodically checks the health of error-state RPC endpoints
