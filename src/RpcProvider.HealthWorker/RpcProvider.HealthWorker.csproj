@@ -5,7 +5,6 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
-    <PackageId>Tricksfor.RpcProvider.HealthWorker</PackageId>
     <!-- Include README in the generated NuGet package and set repository/project links -->
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <RepositoryUrl>https://github.com/Tricksfor-Organization/RpcProvider</RepositoryUrl>
@@ -16,9 +15,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\RpcProvider.Core\RpcProvider.Core.csproj">
-      <PackageId>Tricksfor.RpcProvider.Core</PackageId>
-    </ProjectReference>
+    <ProjectReference Include="..\RpcProvider.Core\RpcProvider.Core.csproj" />
   </ItemGroup>
 
   <ItemGroup>
