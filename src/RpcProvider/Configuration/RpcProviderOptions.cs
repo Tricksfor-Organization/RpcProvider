@@ -52,4 +52,12 @@ public class RpcProviderOptions
     /// Default: 30 minutes.
     /// </summary>
     public int MaxBackoffMinutes { get; set; } = 30;
+
+    /// <summary>
+    /// Cache key prefix to isolate cache entries between different projects.
+    /// Used when multiple projects share the same cache backend (e.g., Redis).
+    /// Default: null (no prefix).
+    /// Example: "ProjectA", "MyApp", etc.
+    /// </summary>
+    public string? CacheKeyPrefix { get; set; }
 }

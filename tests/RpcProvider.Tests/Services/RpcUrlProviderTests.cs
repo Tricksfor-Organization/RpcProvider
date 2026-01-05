@@ -514,4 +514,134 @@ public class RpcUrlProviderTests
         // Assert
         result.ShouldBe("https://eth-rpc.example.com");
     }
+
+    [Test]
+    public async Task GetBestRpcUrlAsync_WithCacheKeyPrefix_ShouldUsePrefixedCacheKey()
+    {
+        // Arrange
+        var chain = Chain.MainNet;
+        var cachedUrl = "https://cached-eth-rpc.example.com";
+        var prefix = "ProjectA";
+        var expectedCacheKey = $"rpc:best:{(int)chain}:{prefix}";
+        
+        _options.CacheKeyPrefix = prefix;
+
+        _cache.GetOrCreateAsync<string?>(
+                expectedCacheKey,
+                Arg.Any<Func<CancellationToken, ValueTask<string?>>>(),
+                cancellationToken: Arg.Any<CancellationToken>())
+            .Returns(cachedUrl);
+
+        // Act
+        var result = await _sut.GetBestRpcUrlAsync(chain);
+
+        // Assert
+        result.ShouldBe(cachedUrl);
+        await _cache.Received(1).GetOrCreateAsync<string?>(
+            expectedCacheKey,
+            Arg.Any<Func<CancellationToken, ValueTask<string?>>>(),
+            cancellationToken: Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task GetBestRpcUrlAsync_WithoutCacheKeyPrefix_ShouldUseDefaultCacheKey()
+    {
+        // Arrange
+        var chain = Chain.MainNet;
+        var cachedUrl = "https://cached-eth-rpc.example.com";
+        var expectedCacheKey = $"rpc:best:{(int)chain}";
+        
+        _options.CacheKeyPrefix = null; // No prefix
+
+        _cache.GetOrCreateAsync<string?>(
+                expectedCacheKey,
+                Arg.Any<Func<CancellationToken, ValueTask<string?>>>(),
+                cancellationToken: Arg.Any<CancellationToken>())
+            .Returns(cachedUrl);
+
+        // Act
+        var result = await _sut.GetBestRpcUrlAsync(chain);
+
+        // Assert
+        result.ShouldBe(cachedUrl);
+        await _cache.Received(1).GetOrCreateAsync<string?>(
+            expectedCacheKey,
+            Arg.Any<Func<CancellationToken, ValueTask<string?>>>(),
+            cancellationToken: Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task MarkAsFailedAsync_WithCacheKeyPrefix_ShouldInvalidatePrefixedCache()
+    {
+        // Arrange
+        var url = "https://eth-rpc.example.com";
+        var chain = Chain.MainNet;
+        var prefix = "ProjectB";
+        var expectedCacheKey = $"rpc:best:{(int)chain}:{prefix}";
+        
+        _options.CacheKeyPrefix = prefix;
+        
+        var endpoint = new RpcEndpoint
+        {
+            Id = Guid.NewGuid(),
+            Chain = chain,
+            Url = url,
+            State = RpcState.Active,
+            Priority = 1,
+            ConsecutiveErrors = 2
+        };
+
+        var exception = new Exception("Connection timeout");
+
+        _repository.GetByUrlAsync(url, Arg.Any<CancellationToken>())
+            .Returns(endpoint);
+
+        // Act
+        await _sut.MarkAsFailedAsync(url, exception);
+
+        // Assert
+        await _cache.Received(1).RemoveAsync(expectedCacheKey, Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task CacheEndpoint_WithCacheKeyPrefix_ShouldSetPrefixedCache()
+    {
+        // Arrange
+        var chain = Chain.MainNet;
+        var prefix = "ProjectC";
+        var expectedCacheKey = $"rpc:best:{(int)chain}:{prefix}";
+        
+        _options.CacheKeyPrefix = prefix;
+        
+        var endpoint = new RpcEndpoint
+        {
+            Id = Guid.NewGuid(),
+            Chain = chain,
+            Url = "https://eth-rpc-1.example.com",
+            State = RpcState.Active,
+            Priority = 1,
+            ConsecutiveErrors = 0
+        };
+
+        _cache.GetOrCreateAsync<string?>(
+                Arg.Any<string>(),
+                Arg.Any<Func<CancellationToken, ValueTask<string?>>>(),
+                cancellationToken: Arg.Any<CancellationToken>())
+            .Returns((string?)null);
+
+        _repository.GetByChainAndStateAsync(chain, RpcState.Active, Arg.Any<CancellationToken>())
+            .Returns(new List<RpcEndpoint> { endpoint });
+
+        // Act
+        var result = await _sut.GetBestRpcUrlAsync(chain);
+
+        // Assert
+        result.ShouldBe(endpoint.Url);
+        await _cache.Received(1).SetAsync(
+            expectedCacheKey,
+            endpoint.Url,
+            Arg.Any<HybridCacheEntryOptions>(),
+            Arg.Any<string[]>(),
+            Arg.Any<CancellationToken>());
+    }
 }
