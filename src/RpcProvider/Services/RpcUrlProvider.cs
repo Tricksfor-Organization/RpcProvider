@@ -278,7 +278,17 @@ public class RpcUrlProvider(
         }
     }
 
-    private static string GetCacheKey(Chain chain) => $"rpc:best:{(int)chain}";
+    private string GetCacheKey(Chain chain)
+    {
+        var key = $"rpc:best:{(int)chain}";
+        
+        if (!string.IsNullOrWhiteSpace(_options.CacheKeyPrefix))
+        {
+            key = $"{key}:{_options.CacheKeyPrefix}";
+        }
+        
+        return key;
+    }
 
     #endregion
 }
