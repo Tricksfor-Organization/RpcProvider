@@ -144,10 +144,13 @@ Update `appsettings.json`:
     "HealthCheckIntervalMinutes": 5,
     "EnableHealthChecks": true,
     "BaseBackoffMinutes": 1,
-    "MaxBackoffMinutes": 30
+    "MaxBackoffMinutes": 30,
+    "CacheKeyPrefix": "YourProjectName"
   }
 }
 ```
+
+**Note:** Set `CacheKeyPrefix` to your project name when sharing Redis cache with other projects to prevent cache conflicts.
 
 ### Step 6: Create Migration
 

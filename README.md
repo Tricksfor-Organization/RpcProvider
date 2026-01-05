@@ -221,10 +221,13 @@ app.Run();
     "HealthCheckIntervalMinutes": 5,
     "EnableHealthChecks": true,
     "BaseBackoffMinutes": 1,
-    "MaxBackoffMinutes": 30
+    "MaxBackoffMinutes": 30,
+    "CacheKeyPrefix": "MyApp"
   }
 }
 ```
+
+**Note:** The `CacheKeyPrefix` is optional but recommended when multiple projects share the same Redis cache. This prevents cache key conflicts between projects.
 
 ### 5. Create Migration
 
@@ -398,6 +401,7 @@ public class BlockchainService
 | `EnableHealthChecks` | bool | true | Enable or disable health checks |
 | `BaseBackoffMinutes` | int | 1 | Base backoff time for exponential backoff |
 | `MaxBackoffMinutes` | int | 30 | Maximum backoff time for exponential backoff |
+| `CacheKeyPrefix` | string? | null | Cache key prefix to isolate cache entries between projects sharing the same cache backend (e.g., Redis). Example: "ProjectA", "MyApp" |
 
 ## Database Schema
 
@@ -443,6 +447,46 @@ public class BlockchainService
 - When Redis recovers → automatically uses distributed caching again
 
 This means your application works perfectly fine with or without Redis!
+
+### Multi-Project Cache Isolation
+
+When multiple projects share the same Redis cache instance, use `CacheKeyPrefix` to prevent cache conflicts:
+
+**Example Scenario:**
+- ProjectA (Web API) and ProjectB (Background Worker) both use RpcProvider
+- Both connect to the same Redis instance
+- Both query Ethereum Mainnet (Chain.MainNet = 1)
+
+**Without CacheKeyPrefix:**
+```
+ProjectA cache key: "rpc:best:1"
+ProjectB cache key: "rpc:best:1"  ❌ Conflict! Same key
+```
+
+**With CacheKeyPrefix:**
+```csharp
+// ProjectA appsettings.json
+{
+  "RpcProvider": {
+    "CacheKeyPrefix": "ProjectA"
+  }
+}
+
+// ProjectB appsettings.json
+{
+  "RpcProvider": {
+    "CacheKeyPrefix": "ProjectB"
+  }
+}
+```
+
+Generated cache keys:
+```
+ProjectA cache key: "rpc:best:1:ProjectA"
+ProjectB cache key: "rpc:best:1:ProjectB"  ✅ Isolated!
+```
+
+This ensures each project maintains its own cache entries and endpoint selections independently.
 
 ### Exponential Backoff
 
