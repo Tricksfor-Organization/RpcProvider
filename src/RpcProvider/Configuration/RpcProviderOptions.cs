@@ -60,4 +60,11 @@ public class RpcProviderOptions
     /// Example: "ProjectA", "MyApp", etc.
     /// </summary>
     public string? CacheKeyPrefix { get; set; }
+
+    /// <summary>
+    /// Maximum number of different RPC endpoints to try in ExecuteWithRetryAsync.
+    /// -1 means try all available endpoints.
+    /// Default: -1 (try all).
+    /// </summary>
+    public int MaxRetryAttempts { get; set; } = -1;
 }

@@ -644,4 +644,416 @@ public class RpcUrlProviderTests
             Arg.Any<string[]>(),
             Arg.Any<CancellationToken>());
     }
+
+    #region ExecuteWithRetryAsync Tests
+
+    [Test]
+    public async Task ExecuteWithRetryAsync_WithResult_WhenFirstEndpointSucceeds_ShouldReturnResult()
+    {
+        // Arrange
+        var chain = Chain.MainNet;
+        var endpoint = new RpcEndpoint
+        {
+            Id = Guid.NewGuid(),
+            Chain = chain,
+            Url = "https://eth-rpc-1.example.com",
+            State = RpcState.Active,
+            Priority = 1,
+            ConsecutiveErrors = 0
+        };
+
+        _repository.GetByChainAndStateAsync(chain, RpcState.Active, Arg.Any<CancellationToken>())
+            .Returns(new List<RpcEndpoint> { endpoint });
+        _repository.GetByChainAndStateAsync(chain, RpcState.Error, Arg.Any<CancellationToken>())
+            .Returns(new List<RpcEndpoint>());
+
+        var expectedResult = "0x1234567890";
+        Func<string, CancellationToken, Task<string>> operation = (url, ct) =>
+        {
+            url.ShouldBe(endpoint.Url);
+            return Task.FromResult(expectedResult);
+        };
+
+        // Act
+        var result = await _sut.ExecuteWithRetryAsync(chain, operation);
+
+        // Assert
+        result.ShouldBe(expectedResult);
+        await _repository.Received(1).GetByUrlAsync(endpoint.Url, Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task ExecuteWithRetryAsync_WithResult_WhenFirstFails_ShouldRetryWithNextEndpoint()
+    {
+        // Arrange
+        var chain = Chain.MainNet;
+        var endpoint1 = new RpcEndpoint
+        {
+            Id = Guid.NewGuid(),
+            Chain = chain,
+            Url = "https://eth-rpc-1.example.com",
+            State = RpcState.Active,
+            Priority = 1,
+            ConsecutiveErrors = 0
+        };
+
+        var endpoint2 = new RpcEndpoint
+        {
+            Id = Guid.NewGuid(),
+            Chain = chain,
+            Url = "https://eth-rpc-2.example.com",
+            State = RpcState.Active,
+            Priority = 2,
+            ConsecutiveErrors = 0
+        };
+
+        _repository.GetByChainAndStateAsync(chain, RpcState.Active, Arg.Any<CancellationToken>())
+            .Returns(new List<RpcEndpoint> { endpoint1, endpoint2 });
+        _repository.GetByChainAndStateAsync(chain, RpcState.Error, Arg.Any<CancellationToken>())
+            .Returns(new List<RpcEndpoint>());
+        
+        _repository.GetByUrlAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(endpoint1, endpoint2);
+
+        var callCount = 0;
+        var expectedResult = "0x1234567890";
+        Func<string, CancellationToken, Task<string>> operation = (url, ct) =>
+        {
+            callCount++;
+            if (callCount == 1)
+            {
+                url.ShouldBe(endpoint1.Url);
+                throw new HttpRequestException("Network error");
+            }
+            url.ShouldBe(endpoint2.Url);
+            return Task.FromResult(expectedResult);
+        };
+
+        // Act
+        var result = await _sut.ExecuteWithRetryAsync(chain, operation);
+
+        // Assert
+        result.ShouldBe(expectedResult);
+        callCount.ShouldBe(2);
+        await _repository.Received(1).UpdateAsync(
+            Arg.Is<RpcEndpoint>(e => e.Url == endpoint1.Url && e.ConsecutiveErrors == 1),
+            Arg.Any<CancellationToken>());
+        await _repository.Received(1).UpdateAsync(
+            Arg.Is<RpcEndpoint>(e => e.Url == endpoint2.Url && e.ConsecutiveErrors == 0),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task ExecuteWithRetryAsync_WithResult_WhenAllEndpointsFail_ShouldThrowAllRpcEndpointsFailedException()
+    {
+        // Arrange
+        var chain = Chain.MainNet;
+        var endpoint1 = new RpcEndpoint
+        {
+            Id = Guid.NewGuid(),
+            Chain = chain,
+            Url = "https://eth-rpc-1.example.com",
+            State = RpcState.Active,
+            Priority = 1,
+            ConsecutiveErrors = 0
+        };
+
+        var endpoint2 = new RpcEndpoint
+        {
+            Id = Guid.NewGuid(),
+            Chain = chain,
+            Url = "https://eth-rpc-2.example.com",
+            State = RpcState.Active,
+            Priority = 2,
+            ConsecutiveErrors = 0
+        };
+
+        _repository.GetByChainAndStateAsync(chain, RpcState.Active, Arg.Any<CancellationToken>())
+            .Returns(new List<RpcEndpoint> { endpoint1, endpoint2 });
+        _repository.GetByChainAndStateAsync(chain, RpcState.Error, Arg.Any<CancellationToken>())
+            .Returns(new List<RpcEndpoint>());
+        
+        _repository.GetByUrlAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(endpoint1, endpoint2);
+
+        Func<string, CancellationToken, Task<string>> operation = (url, ct) =>
+        {
+            throw new HttpRequestException($"Network error for {url}");
+        };
+
+        // Act & Assert
+        var exception = await Should.ThrowAsync<AllRpcEndpointsFailedException>(
+            async () => await _sut.ExecuteWithRetryAsync(chain, operation));
+
+        exception.Chain.ShouldBe(chain);
+        exception.Failures.Count.ShouldBe(2);
+        exception.Failures[0].Url.ShouldBe(endpoint1.Url);
+        exception.Failures[1].Url.ShouldBe(endpoint2.Url);
+    }
+
+    [Test]
+    public async Task ExecuteWithRetryAsync_WithResult_WhenIgnoreBackoff_ShouldTryAllErrorEndpoints()
+    {
+        // Arrange
+        var chain = Chain.MainNet;
+        var activeEndpoint = new RpcEndpoint
+        {
+            Id = Guid.NewGuid(),
+            Chain = chain,
+            Url = "https://eth-rpc-active.example.com",
+            State = RpcState.Active,
+            Priority = 1,
+            ConsecutiveErrors = 0
+        };
+
+        var errorEndpoint = new RpcEndpoint
+        {
+            Id = Guid.NewGuid(),
+            Chain = chain,
+            Url = "https://eth-rpc-error.example.com",
+            State = RpcState.Error,
+            Priority = 2,
+            ConsecutiveErrors = 5,
+            LastErrorAt = DateTime.UtcNow.AddSeconds(-30) // Still in backoff period
+        };
+
+        _repository.GetByChainAndStateAsync(chain, RpcState.Active, Arg.Any<CancellationToken>())
+            .Returns(new List<RpcEndpoint> { activeEndpoint });
+        _repository.GetByChainAndStateAsync(chain, RpcState.Error, Arg.Any<CancellationToken>())
+            .Returns(new List<RpcEndpoint> { errorEndpoint });
+        
+        _repository.GetByUrlAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(activeEndpoint, errorEndpoint);
+
+        var callCount = 0;
+        var expectedResult = "0x1234567890";
+        Func<string, CancellationToken, Task<string>> operation = (url, ct) =>
+        {
+            callCount++;
+            if (callCount == 1)
+            {
+                url.ShouldBe(activeEndpoint.Url);
+                throw new HttpRequestException("Network error");
+            }
+            url.ShouldBe(errorEndpoint.Url);
+            return Task.FromResult(expectedResult);
+        };
+
+        // Act
+        var result = await _sut.ExecuteWithRetryAsync(chain, operation, ignoreBackoff: true);
+
+        // Assert
+        result.ShouldBe(expectedResult);
+        callCount.ShouldBe(2);
+    }
+
+    [Test]
+    public async Task ExecuteWithRetryAsync_WithResult_WhenMaxRetryAttemptsReached_ShouldStopRetrying()
+    {
+        // Arrange
+        var chain = Chain.MainNet;
+        _options.MaxRetryAttempts = 2;
+
+        var endpoints = new List<RpcEndpoint>
+        {
+            new() { Id = Guid.NewGuid(), Chain = chain, Url = "https://eth-rpc-1.example.com", State = RpcState.Active, Priority = 1 },
+            new() { Id = Guid.NewGuid(), Chain = chain, Url = "https://eth-rpc-2.example.com", State = RpcState.Active, Priority = 2 },
+            new() { Id = Guid.NewGuid(), Chain = chain, Url = "https://eth-rpc-3.example.com", State = RpcState.Active, Priority = 3 }
+        };
+
+        _repository.GetByChainAndStateAsync(chain, RpcState.Active, Arg.Any<CancellationToken>())
+            .Returns(endpoints);
+        _repository.GetByChainAndStateAsync(chain, RpcState.Error, Arg.Any<CancellationToken>())
+            .Returns(new List<RpcEndpoint>());
+        
+        _repository.GetByUrlAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(endpoints[0], endpoints[1], endpoints[2]);
+
+        var callCount = 0;
+        Func<string, CancellationToken, Task<string>> operation = (url, ct) =>
+        {
+            callCount++;
+            throw new HttpRequestException($"Network error for {url}");
+        };
+
+        // Act & Assert
+        var exception = await Should.ThrowAsync<AllRpcEndpointsFailedException>(
+            async () => await _sut.ExecuteWithRetryAsync(chain, operation));
+
+        callCount.ShouldBe(2); // Should only try 2 times, not 3
+        exception.Failures.Count.ShouldBe(2);
+    }
+
+    [Test]
+    public async Task ExecuteWithRetryAsync_WithResult_WhenOperationIsNull_ShouldThrowArgumentNullException()
+    {
+        // Arrange
+        var chain = Chain.MainNet;
+
+        // Act & Assert
+        await Should.ThrowAsync<ArgumentNullException>(
+            async () => await _sut.ExecuteWithRetryAsync<string>(chain, null!));
+    }
+
+    [Test]
+    public async Task ExecuteWithRetryAsync_WithoutResult_ShouldExecuteSuccessfully()
+    {
+        // Arrange
+        var chain = Chain.MainNet;
+        var endpoint = new RpcEndpoint
+        {
+            Id = Guid.NewGuid(),
+            Chain = chain,
+            Url = "https://eth-rpc-1.example.com",
+            State = RpcState.Active,
+            Priority = 1,
+            ConsecutiveErrors = 0
+        };
+
+        _repository.GetByChainAndStateAsync(chain, RpcState.Active, Arg.Any<CancellationToken>())
+            .Returns(new List<RpcEndpoint> { endpoint });
+        _repository.GetByChainAndStateAsync(chain, RpcState.Error, Arg.Any<CancellationToken>())
+            .Returns(new List<RpcEndpoint>());
+        
+        _repository.GetByUrlAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(endpoint);
+
+        var executed = false;
+        Func<string, CancellationToken, Task> operation = (url, ct) =>
+        {
+            url.ShouldBe(endpoint.Url);
+            executed = true;
+            return Task.CompletedTask;
+        };
+
+        // Act
+        await _sut.ExecuteWithRetryAsync(chain, operation);
+
+        // Assert
+        executed.ShouldBeTrue();
+    }
+
+    [Test]
+    public async Task ExecuteWithRetryAsync_WithoutResult_WhenFirstFails_ShouldRetryWithNextEndpoint()
+    {
+        // Arrange
+        var chain = Chain.MainNet;
+        var endpoint1 = new RpcEndpoint
+        {
+            Id = Guid.NewGuid(),
+            Chain = chain,
+            Url = "https://eth-rpc-1.example.com",
+            State = RpcState.Active,
+            Priority = 1,
+            ConsecutiveErrors = 0
+        };
+
+        var endpoint2 = new RpcEndpoint
+        {
+            Id = Guid.NewGuid(),
+            Chain = chain,
+            Url = "https://eth-rpc-2.example.com",
+            State = RpcState.Active,
+            Priority = 2,
+            ConsecutiveErrors = 0
+        };
+
+        _repository.GetByChainAndStateAsync(chain, RpcState.Active, Arg.Any<CancellationToken>())
+            .Returns(new List<RpcEndpoint> { endpoint1, endpoint2 });
+        _repository.GetByChainAndStateAsync(chain, RpcState.Error, Arg.Any<CancellationToken>())
+            .Returns(new List<RpcEndpoint>());
+        
+        _repository.GetByUrlAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(endpoint1, endpoint2);
+
+        var callCount = 0;
+        Func<string, CancellationToken, Task> operation = (url, ct) =>
+        {
+            callCount++;
+            if (callCount == 1)
+            {
+                url.ShouldBe(endpoint1.Url);
+                throw new HttpRequestException("Network error");
+            }
+            url.ShouldBe(endpoint2.Url);
+            return Task.CompletedTask;
+        };
+
+        // Act
+        await _sut.ExecuteWithRetryAsync(chain, operation);
+
+        // Assert
+        callCount.ShouldBe(2);
+    }
+
+    [Test]
+    public async Task ExecuteWithRetryAsync_WithoutResult_WhenOperationIsNull_ShouldThrowArgumentNullException()
+    {
+        // Arrange
+        var chain = Chain.MainNet;
+
+        // Act & Assert
+        await Should.ThrowAsync<ArgumentNullException>(
+            async () => await _sut.ExecuteWithRetryAsync(chain, (Func<string, CancellationToken, Task>)null!));
+    }
+
+    [Test]
+    public async Task ExecuteWithRetryAsync_WithDisabledFallback_ShouldTryDisabledEndpoints()
+    {
+        // Arrange
+        var chain = Chain.MainNet;
+        _options.AllowDisabledEndpointsAsFallback = true;
+
+        var activeEndpoint = new RpcEndpoint
+        {
+            Id = Guid.NewGuid(),
+            Chain = chain,
+            Url = "https://eth-rpc-active.example.com",
+            State = RpcState.Active,
+            Priority = 1,
+            ConsecutiveErrors = 0
+        };
+
+        var disabledEndpoint = new RpcEndpoint
+        {
+            Id = Guid.NewGuid(),
+            Chain = chain,
+            Url = "https://eth-rpc-disabled.example.com",
+            State = RpcState.Disabled,
+            Priority = 2
+        };
+
+        _repository.GetByChainAndStateAsync(chain, RpcState.Active, Arg.Any<CancellationToken>())
+            .Returns(new List<RpcEndpoint> { activeEndpoint });
+        _repository.GetByChainAndStateAsync(chain, RpcState.Error, Arg.Any<CancellationToken>())
+            .Returns(new List<RpcEndpoint>());
+        _repository.GetByChainAndStateAsync(chain, RpcState.Disabled, Arg.Any<CancellationToken>())
+            .Returns(new List<RpcEndpoint> { disabledEndpoint });
+        
+        _repository.GetByUrlAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(activeEndpoint, disabledEndpoint);
+
+        var callCount = 0;
+        var expectedResult = "0x1234567890";
+        Func<string, CancellationToken, Task<string>> operation = (url, ct) =>
+        {
+            callCount++;
+            if (callCount == 1)
+            {
+                url.ShouldBe(activeEndpoint.Url);
+                throw new HttpRequestException("Network error");
+            }
+            url.ShouldBe(disabledEndpoint.Url);
+            return Task.FromResult(expectedResult);
+        };
+
+        // Act
+        var result = await _sut.ExecuteWithRetryAsync(chain, operation);
+
+        // Assert
+        result.ShouldBe(expectedResult);
+        callCount.ShouldBe(2);
+    }
+
+    #endregion
 }

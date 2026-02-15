@@ -189,7 +189,149 @@ public class RpcUrlProvider(
         return endpoint?.State == RpcState.Active && endpoint.ConsecutiveErrors == 0;
     }
 
+    public async Task<TResult> ExecuteWithRetryAsync<TResult>(
+        Chain chain,
+        Func<string, CancellationToken, Task<TResult>> operation,
+        bool ignoreBackoff = false,
+        CancellationToken cancellationToken = default)
+    {
+        if (operation == null)
+            throw new ArgumentNullException(nameof(operation));
+
+        var failures = new List<RpcEndpointFailure>();
+        var triedUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var attemptCount = 0;
+
+        _logger.LogDebug("Starting ExecuteWithRetryAsync for chain {Chain} ({ChainId}), ignoreBackoff={IgnoreBackoff}", 
+            chain, (int)chain, ignoreBackoff);
+
+        // Get all available endpoints in priority order
+        var availableEndpoints = await GetAvailableEndpointsForRetryAsync(chain, ignoreBackoff, cancellationToken);
+
+        foreach (var endpoint in availableEndpoints)
+        {
+            // Check if we've already tried this URL
+            if (triedUrls.Contains(endpoint.Url))
+                continue;
+
+            // Check max retry attempts limit
+            if (_options.MaxRetryAttempts > 0 && attemptCount >= _options.MaxRetryAttempts)
+            {
+                _logger.LogWarning("Reached maximum retry attempts ({MaxRetryAttempts}) for chain {Chain} ({ChainId})", 
+                    _options.MaxRetryAttempts, chain, (int)chain);
+                break;
+            }
+
+            triedUrls.Add(endpoint.Url);
+            attemptCount++;
+
+            _logger.LogDebug("Attempting operation with RPC endpoint {Url} (attempt {Attempt}) for chain {Chain} ({ChainId})", 
+                endpoint.Url, attemptCount, chain, (int)chain);
+
+            try
+            {
+                var result = await operation(endpoint.Url, cancellationToken);
+                
+                // Success! Mark endpoint as successful
+                await MarkAsSuccessAsync(endpoint.Url, cancellationToken);
+                
+                _logger.LogInformation("Successfully executed operation with RPC endpoint {Url} for chain {Chain} ({ChainId})", 
+                    endpoint.Url, chain, (int)chain);
+                
+                return result;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Operation failed with RPC endpoint {Url} for chain {Chain} ({ChainId}): {ErrorMessage}", 
+                    endpoint.Url, chain, (int)chain, ex.Message);
+
+                // Mark endpoint as failed
+                await MarkAsFailedAsync(endpoint.Url, ex, cancellationToken);
+                
+                // Track the failure
+                failures.Add(new RpcEndpointFailure(endpoint.Url, ex));
+            }
+        }
+
+        // All endpoints failed
+        _logger.LogError("All {FailureCount} RPC endpoint(s) failed for chain {Chain} ({ChainId})", 
+            failures.Count, chain, (int)chain);
+        
+        throw new AllRpcEndpointsFailedException(chain, failures);
+    }
+
+    public async Task ExecuteWithRetryAsync(
+        Chain chain,
+        Func<string, CancellationToken, Task> operation,
+        bool ignoreBackoff = false,
+        CancellationToken cancellationToken = default)
+    {
+        if (operation == null)
+            throw new ArgumentNullException(nameof(operation));
+
+        // Wrap void operation in a Func that returns a dummy result
+        await ExecuteWithRetryAsync(
+            chain,
+            async (url, ct) =>
+            {
+                await operation(url, ct);
+                return true; // Dummy return value
+            },
+            ignoreBackoff,
+            cancellationToken);
+    }
+
     #region Private Methods
+
+    private async Task<List<RpcEndpoint>> GetAvailableEndpointsForRetryAsync(
+        Chain chain, 
+        bool ignoreBackoff, 
+        CancellationToken cancellationToken)
+    {
+        var availableEndpoints = new List<RpcEndpoint>();
+
+        // 1. Get all Active endpoints (highest priority)
+        var activeEndpoints = await _repository.GetByChainAndStateAsync(chain, RpcState.Active, cancellationToken);
+        availableEndpoints.AddRange(activeEndpoints);
+
+        _logger.LogDebug("Found {Count} active endpoints for chain {Chain} ({ChainId})", 
+            activeEndpoints.Count(), chain, (int)chain);
+
+        // 2. Get Error endpoints
+        var errorEndpoints = await _repository.GetByChainAndStateAsync(chain, RpcState.Error, cancellationToken);
+        var errorEndpointsList = errorEndpoints.ToList();
+
+        if (ignoreBackoff)
+        {
+            // Add all error endpoints regardless of backoff
+            availableEndpoints.AddRange(errorEndpointsList);
+            _logger.LogDebug("Added {Count} error endpoints (ignoring backoff) for chain {Chain} ({ChainId})", 
+                errorEndpointsList.Count, chain, (int)chain);
+        }
+        else
+        {
+            // Only add error endpoints that passed backoff period
+            var recoverableEndpoints = errorEndpointsList.Where(e => IsRecoverable(e)).ToList();
+            availableEndpoints.AddRange(recoverableEndpoints);
+            _logger.LogDebug("Added {Count} recoverable error endpoints (respecting backoff) for chain {Chain} ({ChainId})", 
+                recoverableEndpoints.Count, chain, (int)chain);
+        }
+
+        // 3. If allowed, get Disabled endpoints as last resort
+        if (_options.AllowDisabledEndpointsAsFallback)
+        {
+            var disabledEndpoints = await _repository.GetByChainAndStateAsync(chain, RpcState.Disabled, cancellationToken);
+            availableEndpoints.AddRange(disabledEndpoints);
+            _logger.LogDebug("Added {Count} disabled endpoints as fallback for chain {Chain} ({ChainId})", 
+                disabledEndpoints.Count(), chain, (int)chain);
+        }
+
+        // Sort by priority, then by consecutive errors
+        return availableEndpoints
+            .OrderBy(e => e.Priority)
+            .ThenBy(e => e.ConsecutiveErrors)
+            .ToList();
+    }
 
     private async Task<IEnumerable<RpcEndpoint>> GetRecoverableErrorEndpointsAsync(Chain chain, CancellationToken cancellationToken)
     {
