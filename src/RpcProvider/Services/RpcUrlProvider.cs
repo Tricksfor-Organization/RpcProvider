@@ -208,6 +208,12 @@ public class RpcUrlProvider(
         // Get all available endpoints in priority order
         var availableEndpoints = await GetAvailableEndpointsForRetryAsync(chain, ignoreBackoff, cancellationToken);
 
+        if (availableEndpoints.Count == 0)
+        {
+            _logger.LogError("No available RPC endpoints for chain {Chain} ({ChainId})", chain, (int)chain);
+            throw new NoHealthyRpcException(chain);
+        }
+
         foreach (var endpoint in availableEndpoints)
         {
             // Check if we've already tried this URL
@@ -239,6 +245,12 @@ public class RpcUrlProvider(
                     endpoint.Url, chain, (int)chain);
                 
                 return result;
+            }
+            catch (OperationCanceledException ex)
+            {
+                // User cancelled the operation - propagate immediately without marking endpoint as failed
+                _logger.LogDebug(ex, "Operation cancelled by user for chain {Chain} ({ChainId})", chain, (int)chain);
+                throw new OperationCanceledException($"Operation cancelled for chain {chain} ({(int)chain}) after {attemptCount} attempt(s)", ex);
             }
             catch (Exception ex)
             {

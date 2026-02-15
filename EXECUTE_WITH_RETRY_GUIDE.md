@@ -4,7 +4,40 @@ This guide shows how to use the new `ExecuteWithRetryAsync` methods for automati
 
 ## Basic Usage
 
+
+```csharp
+using Nethereum.Signer;
+using Nethereum.Web3;
+using RpcProvider.Interfaces;
+
+public class WalletService
+{
+    private readonly IRpcUrlProvider _rpcProvider;
+
+    public WalletService(IRpcUrlProvider rpcProvider)
+    {
+        _rpcProvider = rpcProvider;
+    }
+
+    public async Task<decimal> GetBalanceAsync(string address)
+    {
+        // Automatically tries all available RPC endpoints until success
+        var balance = await _rpcProvider.ExecuteWithRetryAsync(
+            Chain.MainNet,
+            async (rpcUrl, ct) =>
+            {
+                var web3 = new Web3(rpcUrl);
+                var balanceWei = await web3.Eth.GetBalance.SendRequestAsync(address);
+                return Web3.Convert.FromWei(balanceWei.Value);
+            });
+
+        return balance;
+    }
+}
+```
+
 ### Example 1: Get Balance with Auto-Retry
+
 
 ```csharp
 using Nethereum.Signer;
@@ -60,7 +93,6 @@ public async Task<ulong> GetCurrentBlockNumberAsync(Chain chain)
 ```csharp
 public async Task<string> SendTransactionAsync(
     Chain chain,
-    string from,
     string to,
     decimal amount)
 {
@@ -72,7 +104,7 @@ public async Task<string> SendTransactionAsync(
             var amountWei = Web3.Convert.ToWei(amount);
             
             var transaction = await web3.Eth.GetEtherTransferService()
-                .TransferEtherAndWaitForReceiptAsync(to, amount);
+                .TransferEtherAndWaitForReceiptAsync(to, amountWei);
                 
             return transaction.TransactionHash;
         });

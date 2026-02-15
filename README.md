@@ -328,6 +328,24 @@ public class BlockchainService
 
     private bool IsRpcException(Exception ex) =>
         ex is HttpRequestException or TimeoutException or RpcException;
+```csharp
+    }
+
+    // For critical operations, ignore backoff to try all endpoints immediately
+    public async Task<string> GetCriticalDataAsync(Chain chain, string contractAddress)
+    {
+        return await _rpcProvider.ExecuteWithRetryAsync(
+            chain,
+            async (rpcUrl, ct) =>
+            {
+                var web3 = new Web3(rpcUrl);
+                // Replace with your actual critical blockchain operation
+                var contract = web3.Eth.GetContract(/* ABI */, contractAddress);
+                var data = await contract.GetFunction("yourMethod").CallAsync<string>();
+                return data;
+            },
+            ignoreBackoff: true); // Force immediate retry of all endpoints
+    }
 }
 ```
 
