@@ -5,6 +5,7 @@ A robust .NET library for managing blockchain RPC endpoints with automatic failo
 ## Features
 
 - ✅ **Automatic Failover**: Seamlessly switches to alternative endpoints when failures occur
+- ✅ **ExecuteWithRetry**: Built-in retry mechanism that automatically tries all available endpoints
 - ✅ **Health Monitoring**: Background service that tests failed endpoints and marks them as active when recovered
 - ✅ **Intelligent Selection**: Chooses endpoints based on priority and error count
 - ✅ **HybridCache**: In-memory + distributed (Redis) caching with automatic fallback
@@ -327,66 +328,150 @@ public class BlockchainService
 
     private bool IsRpcException(Exception ex) =>
         ex is HttpRequestException or TimeoutException or RpcException;
+```csharp
+    }
+
+    // For critical operations, ignore backoff to try all endpoints immediately
+    public async Task<string> GetCriticalDataAsync(Chain chain, string contractAddress)
+    {
+        return await _rpcProvider.ExecuteWithRetryAsync(
+            chain,
+            async (rpcUrl, ct) =>
+            {
+                var web3 = new Web3(rpcUrl);
+                // Replace with your actual critical blockchain operation
+                var contract = web3.Eth.GetContract(/* ABI */, contractAddress);
+                var data = await contract.GetFunction("yourMethod").CallAsync<string>();
+                return data;
+            },
+            ignoreBackoff: true); // Force immediate retry of all endpoints
+    }
 }
 ```
 
-### Advanced Usage with Automatic Retry
+### Advanced Usage with ExecuteWithRetry (Recommended)
+
+The `ExecuteWithRetryAsync` method automatically handles retries across all available RPC endpoints:
 
 ```csharp
+using Nethereum.Signer;
+using Nethereum.Web3;
+using RpcProvider.Exceptions;
+
 public class BlockchainService
 {
     private readonly IRpcUrlProvider _rpcProvider;
     private readonly ILogger<BlockchainService> _logger;
-    private const int MaxRetries = 3;
 
-    public async Task<string> GetBalanceWithRetryAsync(string address, Chain chain)
+    public BlockchainService(
+        IRpcUrlProvider rpcProvider,
+        ILogger<BlockchainService> logger)
     {
-        string? lastFailedUrl = null;
-
-        for (int attempt = 0; attempt < MaxRetries; attempt++)
-        {
-            try
-            {
-                // Get next available RPC (excluding previously failed one)
-                string rpcUrl = lastFailedUrl == null
-                    ? await _rpcProvider.GetBestRpcUrlAsync(chain)
-                    : await _rpcProvider.GetNextRpcUrlAsync(chain, lastFailedUrl);
-
-                var web3 = new Web3(rpcUrl);
-                var balance = await web3.Eth.GetBalance.SendRequestAsync(address);
-
-                // Mark as successful
-                await _rpcProvider.MarkAsSuccessAsync(rpcUrl);
-
-                return Web3.Convert.FromWei(balance.Value).ToString();
-            }
-            catch (NoHealthyRpcException)
-            {
-                _logger.LogCritical("No healthy RPC endpoints available for {ChainId}", chainId);
-                throw; // Can't retry, no endpoints available
-            }
-            catch (Exception ex) when (IsRpcException(ex))
-            {
-                var currentRpc = await _rpcProvider.GetBestRpcUrlAsync(chainId);
-                lastFailedUrl = currentRpc;
-                await _rpcProvider.MarkAsFailedAsync(currentRpc, ex);
-
-                _logger.LogWarning(ex, 
-                    "RPC call failed on attempt {Attempt}/{MaxRetries}, retrying with different endpoint",
-                    attempt + 1, MaxRetries);
-
-                if (attempt == MaxRetries - 1)
-                    throw new RpcProviderException(
-                        $"All retry attempts failed for chain {chainId}", ex);
-            }
-        }
-
-        throw new RpcProviderException($"Failed after {MaxRetries} attempts");
+        _rpcProvider = rpcProvider;
+        _logger = logger;
     }
 
-    private bool IsRpcException(Exception ex) =>
-        ex is HttpRequestException or TimeoutException or RpcException;
+    public async Task<decimal> GetBalanceAsync(string address, Chain chain)
+    {
+        try
+        {
+            // Automatically tries all available endpoints until success
+            var balance = await _rpcProvider.ExecuteWithRetryAsync(
+                chain,
+                async (rpcUrl, ct) =>
+                {
+                    var web3 = new Web3(rpcUrl);
+                    var balanceWei = await web3.Eth.GetBalance.SendRequestAsync(address);
+                    return Web3.Convert.FromWei(balanceWei.Value);
+                });
+
+            return balance;
+        }
+        catch (AllRpcEndpointsFailedException ex)
+        {
+            _logger.LogError(ex, 
+                "All {Count} RPC endpoints failed for chain {Chain}",
+                ex.Failures.Count, chain);
+            
+            // Log individual failures
+            foreach (var failure in ex.Failures)
+            {
+                _logger.LogDebug("  - {Url}: {Error}", 
+                    failure.Url, failure.Exception.Message);
+            }
+            
+            throw;
+        }
+    }
+
+    // For critical operations, ignore backoff to try all endpoints immediately
+    public async Task<string> GetCriticalDataAsync(Chain chain, string contractAddress)
+    {
+        return await _rpcProvider.ExecuteWithRetryAsync(
+            chain,
+            async (rpcUrl, ct) =>
+            {
+                var web3 = new Web3(rpcUrl);
+                // Your critical blockchain operation
+                return await SomeImportantOperation(web3, contractAddress, ct);
+            },
+            ignoreBackoff: true); // Force immediate retry of all endpoints
+    }
 }
+```
+
+**Benefits of ExecuteWithRetry:**
+- ✅ No manual retry loops
+- ✅ Automatic endpoint tracking (success/failure)
+- ✅ Respects exponential backoff by default
+- ✅ Can override backoff for critical operations
+- ✅ Comprehensive error tracking with `AllRpcEndpointsFailedException`
+
+**See [EXECUTE_WITH_RETRY_GUIDE.md](EXECUTE_WITH_RETRY_GUIDE.md) for complete examples.**
+
+### Manual Retry Pattern (Alternative)
+
+If you need more control, you can use the manual retry pattern:
+
+```csharp
+public async Task<string> GetBalanceWithManualRetryAsync(string address, Chain chain)
+{
+    string? lastFailedUrl = null;
+    const int maxRetries = 3;
+
+    for (int attempt = 0; attempt < maxRetries; attempt++)
+    {
+        try
+        {
+            string rpcUrl = lastFailedUrl == null
+                ? await _rpcProvider.GetBestRpcUrlAsync(chain)
+                : await _rpcProvider.GetNextRpcUrlAsync(chain, lastFailedUrl);
+
+            var web3 = new Web3(rpcUrl);
+            var balance = await web3.Eth.GetBalance.SendRequestAsync(address);
+
+            await _rpcProvider.MarkAsSuccessAsync(rpcUrl);
+            return Web3.Convert.FromWei(balance.Value).ToString();
+        }
+        catch (NoHealthyRpcException)
+        {
+            _logger.LogCritical("No healthy RPC endpoints available");
+            throw;
+        }
+        catch (Exception ex) when (IsRpcException(ex))
+        {
+            lastFailedUrl = await _rpcProvider.GetBestRpcUrlAsync(chain);
+            await _rpcProvider.MarkAsFailedAsync(lastFailedUrl, ex);
+            
+            if (attempt == maxRetries - 1) throw;
+        }
+    }
+
+    throw new InvalidOperationException("Failed after all retries");
+}
+
+private bool IsRpcException(Exception ex) =>
+    ex is HttpRequestException or TimeoutException or RpcException;
 ```
 
 ## Configuration Options
@@ -395,6 +480,7 @@ public class BlockchainService
 |--------|------|---------|-------------|
 | `CacheDurationSeconds` | int | 300 | Duration in seconds to cache healthy RPC endpoints |
 | `MaxConsecutiveErrorsBeforeDisable` | int | 5 | Maximum consecutive errors before marking endpoint as Error |
+| `MaxRetryAttempts` | int | -1 | Maximum retry attempts in ExecuteWithRetryAsync (-1 = try all) |
 | `RequestTimeoutSeconds` | int | 30 | Request timeout in seconds for RPC calls |
 | `AllowDisabledEndpointsAsFallback` | bool | false | Whether to use disabled endpoints as last resort |
 | `HealthCheckIntervalMinutes` | int | 5 | Interval in minutes for health check background service |
@@ -514,6 +600,40 @@ The background worker:
 
 ## Exception Handling
 
+### AllRpcEndpointsFailedException (NEW)
+
+Thrown by `ExecuteWithRetryAsync` when all available RPC endpoints have been tried and failed.
+
+**Properties:**
+- `Chain`: The blockchain chain that failed
+- `Failures`: List of all attempted endpoints with their exceptions
+
+**Handling:**
+```csharp
+using RpcProvider.Exceptions;
+
+try
+{
+    var result = await _rpcProvider.ExecuteWithRetryAsync(
+        Chain.MainNet,
+        async (rpcUrl, ct) => await SomeOperation(rpcUrl, ct));
+}
+catch (AllRpcEndpointsFailedException ex)
+{
+    _logger.LogError("All {Count} endpoints failed for {Chain}", 
+        ex.Failures.Count, ex.Chain);
+    
+    // Inspect individual failures
+    foreach (var failure in ex.Failures)
+    {
+        _logger.LogDebug("  {Url}: {Error}", 
+            failure.Url, failure.Exception.Message);
+    }
+    
+    // Notify ops team, trigger alert, etc.
+}
+```
+
 ### NoHealthyRpcException
 
 Thrown when no healthy endpoints are available for a chain. This indicates:
@@ -525,49 +645,50 @@ Thrown when no healthy endpoints are available for a chain. This indicates:
 ```csharp
 try
 {
-    var rpcUrl = await _rpcProvider.GetBestRpcUrlAsync("Ethereum");
+    var rpcUrl = await _rpcProvider.GetBestRpcUrlAsync(Chain.MainNet);
 }
 catch (NoHealthyRpcException ex)
 {
-    _logger.LogCritical(ex, "No healthy RPC endpoints for chain {ChainId}", ex.ChainId);
+    _logger.LogCritical(ex, "No healthy RPC endpoints for chain {Chain}", ex.Chain);
     // Notify ops team, trigger alert, etc.
 }
 ```
 
 ### RpcProviderException
 
-Generic exception for RPC provider operations.
+Base exception for all RPC provider operations.
 
 ## Best Practices
 
-1. **Always Mark Results**: Call `MarkAsSuccessAsync()` or `MarkAsFailedAsync()` after RPC calls
-2. **Use Retry Logic**: Implement automatic retry with `GetNextRpcUrlAsync()`
-3. **Monitor Health**: Enable the health check worker in production
-4. **Configure Caching**: Adjust cache duration based on your traffic
-5. **Set Priorities**: Assign lower priority values to faster/more reliable endpoints
-6. **Handle Exceptions**: Catch and handle `NoHealthyRpcException` appropriately
-7. **Use Scoped Services**: Register repository as Scoped for proper DbContext lifecycle
+1. **Use ExecuteWithRetry**: Prefer `ExecuteWithRetryAsync()` for automatic failover and retry logic
+2. **Handle AllRpcEndpointsFailedException**: Catch this exception to handle total RPC failures
+3. **Manual Tracking**: If not using ExecuteWithRetry, always call `MarkAsSuccessAsync()` or `MarkAsFailedAsync()`
+4. **Critical Operations**: Use `ignoreBackoff: true` for time-sensitive operations
+5. **Monitor Health**: Enable the health check worker in production
+6. **Configure Caching**: Adjust cache duration based on your traffic
+7. **Set Priorities**: Assign lower priority values to faster/more reliable endpoints
+8. **Handle NoHealthyRpc**: Catch and handle `NoHealthyRpcException` for manual RPC selection
+9. **Use Scoped Services**: Register repository as Scoped for proper DbContext lifecycle
+10. **Cache Isolation**: Use `CacheKeyPrefix` when multiple projects share Redis
 
 ## Project Structure
 
 ```
 RpcProvider/
 ├── src/
-│   ├── RpcProvider.Core/              # Main shared library
+│   ├── RpcProvider/                   # Main library
 │   │   ├── Models/                     # Entity models
 │   │   ├── Interfaces/                 # Service interfaces
 │   │   ├── Services/                   # Service implementations
 │   │   ├── Exceptions/                 # Custom exceptions
 │   │   ├── Configuration/              # Configuration options
 │   │   └── Extensions/                 # DI extensions
-│   └── RpcProvider.HealthWorker/      # Background health check
-│       ├── RpcHealthCheckWorker.cs
-│       └── HealthWorkerExtensions.cs
 ├── tests/
-│   ├── RpcProvider.Core.Tests/        # Core library tests (42 tests)
-│   └── RpcProvider.HealthWorker.Tests/# Health worker tests (6 tests)
+│   └── RpcProvider.Tests/             # Comprehensive tests (69 tests)
 ├── samples/                            # Sample projects (to be added)
-└── README.md
+├── README.md
+├── USAGE_GUIDE.md
+└── EXECUTE_WITH_RETRY_GUIDE.md        # ExecuteWithRetry examples
 ```
 
 ## Contributing
