@@ -1,5 +1,3 @@
-#pragma warning disable S1075 // URIs should not be hardcoded
-#pragma warning disable S1192 // String literals should not be duplicated
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -1055,5 +1053,42 @@ public class RpcUrlProviderTests
         callCount.ShouldBe(2);
     }
 
+    [Test]
+    public async Task ExecuteWithRetryAsync_WhenOperationCancelled_ShouldPropagateOperationCanceledException()
+    {
+        // Arrange
+        var chain = Chain.MainNet;
+
+        var endpoint = new RpcEndpoint
+        {
+            Id = Guid.NewGuid(),
+            Chain = chain,
+            Url = "https://eth-rpc-mainnet.example.com",
+            State = RpcState.Active,
+            Priority = 1,
+            ConsecutiveErrors = 0
+        };
+
+        _repository.GetByChainAndStateAsync(chain, RpcState.Active, Arg.Any<CancellationToken>())
+            .Returns(new List<RpcEndpoint> { endpoint });
+
+        using var cts = new CancellationTokenSource();
+
+        Func<string, CancellationToken, Task<string>> operation = (url, ct) =>
+        {
+            // Cancel the token and then observe cancellation
+            cts.Cancel();
+            ct.ThrowIfCancellationRequested();
+            return Task.FromResult("should-not-be-returned");
+        };
+
+        // Act & Assert
+        await Should.ThrowAsync<OperationCanceledException>(
+            async () => await _sut.ExecuteWithRetryAsync(chain, operation, cancellationToken: cts.Token));
+
+        // Endpoint should not be marked as failed
+        await _repository.DidNotReceive()
+            .UpdateAsync(Arg.Any<RpcEndpoint>(), Arg.Any<CancellationToken>());
+    }
     #endregion
 }
