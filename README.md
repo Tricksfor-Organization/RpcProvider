@@ -269,7 +269,7 @@ var endpoints = new List<RpcEndpoint>
     new RpcEndpoint
     {
         Id = Guid.NewGuid(),
-        Chain = Chain.BinanceSmartChain, // BSC Mainnet
+        Chain = Chain.Binance, // BSC Mainnet
         Url = "https://bsc-dataseed1.binance.org/",
         State = RpcState.Active,
         Priority = 1,

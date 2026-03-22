@@ -171,7 +171,7 @@ Common chains from `Nethereum.Signer.Chain`:
 - `Chain.MainNet` = 1 (Ethereum Mainnet)
 - `Chain.Sepolia` = 11155111 (Ethereum Testnet)
 - `Chain.Polygon` = 137
-- `Chain.BinanceSmartChain` = 56
+- `Chain.Binance` = 56
 - `Chain.Avalanche` = 43114
 - `Chain.Optimism` = 10
 - `Chain.Arbitrum` = 42161
